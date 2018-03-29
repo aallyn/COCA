@@ -1,0 +1,837 @@
+---
+title: Projecting changes in fish availability to coastal fishing communities within the Northeast U.S. large marine ecosystem
+author: "Andrew Allyn and Kathy Mills"
+date: "July 21, 2017"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/', echo=FALSE, warning=FALSE, message=FALSE, cache = TRUE, tidy.opts = list(width.cutoff = 50), tidy = TRUE)
+```
+
+# Introduction
+P1. Climate change is altering the structure and function of marine ecosystems around the world.
+
+P2. Although considerable work has been done to understand the relationships among climate and the physical and biological characteristics of marine ecosystems, fewer efforts have proceeded to examine how these changes will influence coastal communities through changes in the availability of important marine fisheries.
+
+P3. **Why does this next step matter and what do we want to focus on? Adaptation?**
+
+P4. Information on changes in the availability of marine fish and invertebrate species is critically important for the Northeast U.S. large marine ecosystem (NELME). The region includes some of the fastest warming waters in the world. Additionally, fishing is deeply ingrained within the fabric of coastal communities throughout the region and these communities continue to depend heavily on marine resources for their sustainability. 
+
+P5. We worked to fill this knowledge gap as part of a larger interdisciplinary project evaluating the social-ecological vulnerability and climate adaptation strategies for Northeast U.S. fishing communities. Specifically, we estimated projected changes in the availability of marine fish and invertebrate species throughout the NELME over the next 10, 25 and 40 years. These projected changes incorporated information from both quantitative species distribution models and qualitative expert assessments of species vulnerability to climate change. We then localized these NELME region-wide changes to coastal communities by examining differences in fish availability within coastal community fishing footprints. **What makes this study unique and why is it important?**
+
+# Methods
+## Data Collection
+### Species distribution models
+#### NOAA NEFSC Bottom Trawl Data
+We gathered marine fish and invertebrate species distribution and abundance data from annual NOAA Northeast Fisheries Science Center (NOAA NEFSC) spring and fall bottom trawl surveys (Fig. 1). The spatial extent of the surveys ranges from Cape Hatteras off the coast of North Carolina to the Gulf of Maine, including Georges Bank, and the time series dates back to the 1960s. Within a seasonal survey, tow locations are selected using a stratified random design, where the number of tows within a strata depend on the total area of the strata and strata were delineated to capture relatively broad-scale zones with similar ecosystem characteristics. **Something about biomass here.** 
+
+Before fitting statistical species distribution models to the bottom trawl dataset, we modified the original dataset slightly. First, we reduced the spatial extent of the observations by removing tows completed in strata that are now in Canadian waters and tows completed in strata which are now surveyed more regularly by the NOAA Southeast Fisheries Science Center. Second, we aggregated the original dataset such that for a given tow location we had biomass information for all available species. In other words, after the aggregation, every row in the dataset representated a unique tow, species and biomass record. While a wealth of data is collected on fish species caught during a given tow (e.g., sex ratios, length and weight relationships), ultimately, we were most interested in the species biomass data summarized at the tow level.
+
+In addition to the above modifications, we also reduced the dataset to a set of focal species. We defined these focal species as those evaluted by Hare et al. (2016) in their expert assessment of the climate vulnerability of marine fish and invertebrates within the NELME. The reduced dataset included distribution and abundance information for 82 total species: 14 coastal fish, 10 diadromous fish, 12 elasmobranchs, 19 groundfish, 18 benthic invertebrates, 9 pelagic fish and cephalopods. Hare et al. (2016) selected these species based on those that commonly occur in the NELME. As a result, the list includes species that are commercially important, ecologically important, as well as protected species. However, the list does not include many highly migratory species as most of these species spend considerable time outside of the NELME. 
+
+#### Northeast U.S. Large Marine Ecosystem Environmental Characteristics
+To understand the envirionmental drivers of species distribution and abundance patterns, we gathered measurements of static and dynamic ecosystem variables at each unique tow (a combination of both tow location and tow date). Although some of these variables were measured while underway during each of the surveys, there were enough missing observations that we used available datasets and then extracted variable values at each of the tow locations. Static variables included depth and along shelf position. Depth data were downloaded from the NOAA ETOPO1 Global Relief Model (available online at https://www.ngdc.noaa.gov/mgg/global/global.html), which is a layer integrating topographic elevation measurements and ocean bathymetric measurements with a 1 arc-minute resolution. Along shelf position was calculated using the distCosine function in the geosphere library (Hijmans 2016a) and measured the great circle distance from each tow location to the southern end of the bottom trawl survey (longitude = -75, latitude = 35).
+
+Along with these static variables, we also extracted measurements of seasonal sea surface temperature (SST), a dynamic variable, at each tow. Undoubtedly, there will be questions about why we included SST instead of bottom temperature (BT). Certainly, the argument could be made that for some of the marine fish and invertebrate species evaluated, especially groundfish, BT may better represent the habitat condition those fish are experiencing. However, this is not the case for all of the species in the assessment, including those that use the pelagic zone, or the entire water column. Further, we have more confidence in climate model projections of SST than BT. In fact, within all of the climate models, the BT projections are very tightly coupled to the SST projections. In turn, the mean projections and variability around those projections for both variables are likely to show very similar patterns. For all of these reasons, we moved forward using SST instead of BT. 
+
+SST data were gathered from the NOAA daily Optimum Interpolation Sea Surface Temperature (daily OISST) dataset, with a spatial resolution of 1/4 degrees (available online at https://www.ncdc.noaa.gov/oisst/data-access). We then aggregated the daily OISST data to seasonal average SST, where for spring season we averaged all daily temperatures between 01 March and 31 May within a year and fall seasonal average SST was calculated using daily temperature data between 01 September and 30 November. These date ranges were selected becuase they captured the temporal range of completed tows within each of the seasons across the full NOAA NEFSC bottom trawl survey dataset. For a given tow, we then used the seasonal SST value with the matching season and year of the tow sample. 
+
+#### Northeast U.S. Large Marine Ecosystem Projected Sea Surface Temperatures
+While the daily OISST data provided the seasonal SST data needed to fit our quantitiative species distribution models, we also needed future SST data to project species distribution and abundance into the future. We gathered these future SST data from an ensemble of 20+ climate models run under the RCP8.5 "worst case" scenario. **Something about selection of this scenario instead of the others.** Across these 20+ climate models, we estimated the monthly mean SST anomaly (projected SST - 1982-2011 baseline climatologies), as well as the 5th and 95th percentiles of the monthly SST anomalies. Given the number of models included in the ensemble, the 5th percentile coincided with the SST anomaly from the 2nd coldest model and the 95th percentile represented the SST anomaly from the 2nd warmest model. 
+
+As species distribution models were fit with raw seasonal SST values, we translated the projected SST anomalies back into raw temperature space (degrees Celsius). This process was slightly complicated by the well known "warm bias" of climate model projections within the the NELME (Appendix 1).
+
+```{r, eval = TRUE}
+#####
+## Appendix 1 -- Investigating the warm bias of climate model SST
+#####
+
+## Libraries
+library(sp)
+library(ncdf4)
+library(tidyverse)
+library(zoo)
+library(maptools)
+library(rgeos)
+library(raster)
+
+## Some spatial stuff for data visualiztion
+# Spatial projections
+proj.wgs84<- CRS("+init=epsg:4326") #WGS84
+proj.utm<- CRS("+init=epsg:2960") #UTM 19
+
+# NELME domain
+nelme<- readShapePoly("./Data/nelme.shp")
+proj4string(nelme)<- proj.wgs84
+
+# NELME domain bounds
+xlim.use<- c(-77, -65)
+ylim.use<- c(35.05, 45.2)
+
+states <- c("Maine", "New Hampshire", "Massachusetts", "Vermont", "New York", "Rhode Island", "Connecticut", "Delaware", "New Jersey", "Maryland", "Pennsylvania", "Virginia", "North Carolina", "South Carolina", "Georgia", "Florida", "District of Columbia", "West Virgina")
+provinces <- c("Ontario", "Québec", "Nova Scotia", "New Brunswick")
+
+us <- raster::getData("GADM",country="USA",level=1)
+us.states <- us[us$NAME_1 %in% states,]
+us.states <- gSimplify(us.states, tol = 0.075, topologyPreserve = TRUE)
+canada <- raster::getData("GADM",country="CAN",level=1)
+ca.provinces <- canada[canada$NAME_1 %in% provinces,]
+ca.provinces <- gSimplify(ca.provinces, tol = 0.075, topologyPreserve = TRUE)
+
+us.states.f<- fortify(us.states, NAME_1)
+ca.provinces.f<- fortify(ca.provinces, NAME_1)
+
+#####
+## Loading climate data from nc file and then OISST data for comparison
+# Get sst climatology 
+sst.clim.temp <- raster::stack("./Data/SST.CMIP5.1982-2099.anom.nc", varname = "sstclim")
+sst.clim<- raster::rotate(sst.clim.temp)
+names(sst.clim)<- c("Jan", "Feb", "March", "April", "May", "June", "July", "Aug", "Sept", "Oct", "Nov", "Dec")
+
+# Temperature units are in kelvins..need to convert tp degC
+sst.clim<- raster::calc(sst.clim, fun = function(x) x - 273.15)
+
+# Print, plot and summary just to see if temps make sense and we have the right number of layers (12, one per month)
+#print(sst.clim)
+#plot(sst.clim, col = topo.colors(25)) 
+#summary(sst.clim)
+
+# Read OISST
+oisst.dat.temp<- raster::stack("./Data/EC_sst_1981_2015_OISST-V2-AVHRR_agg_combined.nc")
+oisst.dat<- raster::rotate(oisst.dat.temp)
+
+# Date range of daily OISST
+start.oisst<- as.Date(gsub("X", "", gsub("[.]", "-", min(names(oisst.dat)))))
+end.oisst<- as.Date(gsub("X", "", gsub("[.]", "-", max(names(oisst.dat)))))
+
+# Subset data to 1982-2011 historical period
+# First, need to add a time series date id to our oisst.dat raster stack
+oisst.dates<- seq.Date(from = start.oisst, to = end.oisst, by = "day")
+oisst.dat<- raster::setZ(oisst.dat, oisst.dates)
+#print(oisst.dat)
+
+subset.ind<- which(oisst.dates >= "1982-01-01" & oisst.dates <= "2011-12-31", arr.ind = TRUE)
+oisst.sub<- oisst.dat[[subset.ind]]
+
+# Check the date range on the subset, did it do what we want?
+#print(oisst.sub)
+
+# Need to get monthly climatology across time series to match and compare to sstclim. We will also need the sd for calculating anomalies, so doing that here, too.
+months.num<- c("01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12")
+months.names<- c("Jan", "Feb", "March", "April", "May", "June", "July", "Aug", "Sept", "Oct", "Nov", "Dec")
+
+oisst.monthly.mu<- stack()
+oisst.monthly.sd<- stack()
+
+for(i in seq_along(months.num)){
+  
+  # Get a stack of all layers matching the month of months.num[i]
+  stack.temp<- oisst.sub[[which(grepl(months.num[i], format(getZ(oisst.sub), "%m")))]]
+  
+  # Claculate mean of all layers in stack and store it
+  stack.temp.mu<- calc(stack.temp, mean)
+  oisst.monthly.mu<- stack(oisst.monthly.mu, stack.temp.mu)
+  names(oisst.monthly.mu)[i]<- months.names[i]
+  
+  # Calculate SD of all layers in stack and store it
+  stack.temp.sd<- calc(stack.temp, sd)
+  oisst.monthly.sd<- stack(oisst.monthly.sd, stack.temp.sd)
+  names(oisst.monthly.sd)[i]<- months.names[i]
+  
+  #print(paste(months.names[i], " is done", sep = ""))
+}
+
+oisst.monthly.mu<- setZ(oisst.monthly.mu, months.num)
+oisst.monthly.sd<- setZ(oisst.monthly.sd, months.num)
+
+# Same as zApply?
+month <- function(x) as.numeric(format(x, '%m'))
+z.month<- zApply(oisst.sub, by = month, mean)
+method.diffs<- z.month - oisst.monthly.mu
+#summary(method.diffs) # Good
+
+# Resample monthly OISST data to match spatial scale of sst clim
+oisst.monthly.coarse<- raster::resample(oisst.monthly.mu, sst.clim)
+oisst.monthly.sd.coarse<- raster::resample(oisst.monthly.sd, sst.clim)
+
+# Quick check of sumamries for each layer in the stack
+#summary(oisst.monthly.coarse)
+#summary(sst.clim)
+
+# Calculate difference between oisst.monthly.coarse and sstclim
+raw.coarse.diff<- sst.clim - oisst.monthly.coarse
+
+# Convert to dataframe
+plot.df <- as.data.frame(raw.coarse.diff, xy=T)
+
+#Melt n-band raster to long format
+plot.dat<- plot.df %>%
+  gather(., "Month", "SST.Difference", -x, -y)
+plot.dat$Month<- factor(plot.dat$Month, levels = months.names)
+
+# Calculate monthly averages
+monthly.avg<- plot.dat %>%
+  group_by(., Month) %>%
+  dplyr::summarize(., "Average" = round(mean(SST.Difference, na.rm = T), 3)) %>%
+  data.frame(.)
+
+# Plot it
+raw.coarse.diff.plot<- ggplot() + 
+  geom_tile(data = plot.dat, aes(x = x, y = y, fill = SST.Difference), show.legend = TRUE) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", name = "SST Difference", na.value = "gray80") +
+  geom_map(data = us.states.f, map = us.states.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  geom_map(data = ca.provinces.f, map = ca.provinces.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  ylim(ylim.use) + ylab("Lat") +
+  scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
+  coord_fixed(1.3) + 
+  facet_wrap(~Month) +
+  geom_text(data = monthly.avg, x = -68.5, y = 36, aes(label = paste0("Avg ", Average))) +
+  ggtitle("Average coarse scale monthly difference between\nclimate models ensemble mean and OISST (1982-2011)") +
+  theme(panel.background = element_rect(fill = "gray80", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black")) 
+raw.coarse.diff.plot
+```
+
+The resulting plots suggests that we cannot simply use the sst climatology from the climate models ensemble mean as our baseline climatology because of the presence of the warm bias. This then begs the question of how the anomalies behave? Is there the same warm bias in the climate models ensemble mean anomalies? Or do they match the anomalies of the OISST data (Appendix 1 cont)?
+
+```{r, eval = TRUE, fig.align = "center"}
+#####
+## Appendix 1 (cont...) -- Unbiased climate models ensemble mean anomalies
+#####
+
+## Loading climate data anomalies from nc file and then OISST data for comparison
+# Get sst anomalies
+sst.anom.temp <- raster::stack("./Data/SST.CMIP5.1982-2099.anom.nc", varname = "sstanom")
+sst.anom<- raster::rotate(sst.anom.temp) # sst anomaly dates range from 1982-01-16 to 2099-12-16, by month.
+
+# OISST data is in oisst.dat, need to aggregate this daily data to monthly averages for each of the years. Let's also just look at the baseline period, so use oisst.sub instead. 
+years.months<- format(seq(from = as.Date("1982-01-01"), to = as.Date("2011-12-31"), by = "month"), "%Y-%m")
+
+oisst.yrmonth<- stack()
+
+for(i in seq_along(years.months)){
+  
+  # Get year-month stack
+  yrmon.stack<- oisst.sub[[which(grepl(years.months[i], format(getZ(oisst.sub), "%Y-%m")))]]
+  
+  # Calculate mean
+  mu.temp<- calc(yrmon.stack, mean, na.rm = T)
+  oisst.yrmonth<- stack(oisst.yrmonth, mu.temp)
+  names(oisst.yrmonth)[i]<- years.months[i]
+  #print(paste(years.months[i], " is done", sep = ""))
+}
+
+oisst.yrmonth<- setZ(oisst.yrmonth, years.months)
+
+# Same as Zapply?
+z.yrmonth<- zApply(oisst.sub, by = as.yearmon, fun = mean)
+method.diffs<- z.yrmonth - oisst.yrmonth
+#summary(method.diffs) # Same, that is promising
+
+# Now, we can substract the OISST monthly climatologies (oisst.monthly), by matching months to get the OISST anomalies
+oisst.yrmonth.months<- format(as.Date(paste(getZ(oisst.yrmonth), "-01", sep = "")), "%m")
+oisst.anom.index<- match(oisst.yrmonth.months, getZ(oisst.monthly.mu))
+
+oisst.anom<- stack()
+
+for(i in 1:nlayers(oisst.yrmonth)) {
+  
+  # OISST year month layer
+  yrmonth.temp<- oisst.yrmonth[[i]]
+  
+  # OISST month mean layer
+  month.temp<- oisst.monthly.mu[[oisst.anom.index[i]]]
+  
+  # OISST month sd layer -- for standardized anomaly
+  month.sd.temp<- oisst.monthly.sd[[oisst.anom.index[i]]]
+  
+  # Calculate anomaly
+  oisst.anom.temp<- (yrmonth.temp - month.temp)/month.sd.temp
+  
+  oisst.anom<- stack(oisst.anom, oisst.anom.temp)
+  #print(paste(names(oisst.yrmonth)[i], " is done!", sep = ""))
+}
+
+names(oisst.anom)<- names(oisst.yrmonth)
+
+# Lets just look at one of these...the 1981 December anomaly
+#i = 4
+#par(mfrow = c(1,4))
+#plot(oisst.monthly.mu[[oisst.anom.index[i]]], main = "Dec 1981 SST")
+#plot(oisst.yrmonth[[i]], main = "Dec 1982-2011\nSST Climatology")
+#plot((oisst.yrmonth[[i]]-oisst.monthly.mu[[oisst.anom.index[i]]])/oisst.monthly.sd[[oisst.anom.index[i]]], main = "Dec 1982 anomaly", col = topo.colors(25))
+#plot(oisst.anom[[i]], main = "Dec 1982 anomaly\n from stack", col = topo.colors(25))
+
+# Does that make sense? The 1982 Decmber is 2 degrees colder than the 1982-2011 monthly December climatology around North Carolina??
+
+# Now, rescale the oisst anoms
+oisst.anom.coarse<- raster::resample(oisst.anom, sst.anom)
+oisst.anom.coarse<- setZ(oisst.anom.coarse, seq(from = as.Date("1982-01-01"), to = as.Date("2011-12-01"), by = "month"))
+
+# Subset the climate models ensemble sst anoms
+sst.anom.index<- which(getZ(sst.anom) >= "1982-01-01" & getZ(sst.anom) <= "2012-01-01", arr.ind = TRUE) # Climate models use center of the month (day 15 or 16), so adding a buffer on the end date
+sst.anom.sub<- raster::stack(sst.anom[[sst.anom.index]])
+
+# Check
+#print(oisst.anom.coarse)
+#print(sst.anom.sub)
+
+# Looks good, do the subtraction
+anoms.diff<- sst.anom.sub - oisst.anom.coarse 
+anoms.diff<- setZ(anoms.diff, getZ(sst.anom.sub))
+
+# Monthly averages?
+months.num<- c("01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12")
+months.names<- c("Jan", "Feb", "March", "April", "May", "June", "July", "Aug", "Sept", "Oct", "Nov", "Dec")
+anoms.diff.monthly<- stack()
+
+for(i in seq_along(months.num)){
+  anom.diff.temp<- calc(anoms.diff[[which(grepl(months.num[i], format(getZ(anoms.diff), "%m")))]], mean)
+  anoms.diff.monthly<- stack(anoms.diff.monthly, anom.diff.temp)
+  names(anoms.diff.monthly)[i]<- months.names[i]
+  #print(paste(months.names[i], " is done", sep = ""))
+}
+
+anoms.diff.monthly<- setZ(anoms.diff.monthly, months.num)
+
+# Convert to dataframe
+plot.df <- as.data.frame(anoms.diff.monthly, xy=T)
+
+#Melt n-band raster to long format
+plot.dat<- plot.df %>%
+  gather(., "Month", "SST.Anom.Difference", -x, -y)
+plot.dat$Month<- factor(plot.dat$Month, levels = months.names)
+
+# Calculate monthly averages
+monthly.avg<- plot.dat %>%
+  group_by(., Month) %>%
+  dplyr::summarize(., "Average" = round(mean(SST.Anom.Difference, na.rm = T), 3)) %>%
+  data.frame(.)
+
+# Plot it
+anom.diff.plot<- ggplot() + 
+  geom_tile(data = plot.dat, aes(x = x, y = y, fill = SST.Anom.Difference), show.legend = TRUE) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", name = "SST Anomaly Difference", na.value = "gray80") +
+  geom_map(data = us.states.f, map = us.states.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  geom_map(data = ca.provinces.f, map = ca.provinces.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  ylim(ylim.use) + ylab("Lat") +
+  scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
+  coord_fixed(1.3) + 
+  facet_wrap(~Month) +
+  geom_text(data = monthly.avg, x = -68.5, y = 36, aes(label = paste0("Avg ", Average))) +
+  ggtitle("Average coarse scale monthly difference between\nclimate models ensemble mean anomalies and OISST anomalies (1982-2011)") +
+  theme(panel.background = element_rect(fill = "gray80", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black")) 
+anom.diff.plot
+```
+
+With the exception of February, there is no bias in the anomalies. The minimal differences for February appear to be caused by a difference in how the monthly climatologies are calculated. In our processing, we calculated the monthly SST climatology by taking the mean of all observations within the month across all years. In contrast, the SST climatology from the ensemble of climate models were calculated by first getting the mean of each February in each year and then taking the mean across all of the February's. 
+
+Overall, the unbiased ensemble climate models mean anomalies indicates that we can confidently apply the anomalies to either the bias corrected sst ensemble climate models climatology OR to the sst OISST climatology to get projected SST in the future. For simplicity, we decided to just apply the anomalies to 1982-2011 monthly climatologies constructed from the OISST dataset. 
+
+### Qualitative Expert Assessment Species Climate Vulnerability Data
+While species distribution models are an incredibly valuable tool in the quantitative ecologists' toolbox, they do have their limitations. For example, many traditional approaches fail to account for other variables that may influence a species distribution, including biological attributes of the species, such as overall abundance, prey specificity, life history traits, dispersal potential. Additionally, species distribution models may not work well for poorly sampled species or species with low overall abundance as robust correlations between a species occurrence data and the environment fitted by the species distribution model require a rather rich occurrence dataset. One potential way to overcome these shortcomings is to draw on expert opinion. 
+
+For this project, we used NEVA qualitative expert scoring data collected as part of the National Marine Fisheries Service Climate Vulnerability Assessment. As part of this asssessment, experts ranked the overall climate vulnerability and the directional of anticipated climate change effects on species productivity for 82 species inhabiting the NELME (Hare et al. 2016). Overall climate vulnerability was broken down into a combination of climate exposure, climate sensitivity, where climate exposure measured the severity of change in the physical environment caused by climate change (12 factors), sensitivity measured biological traits that may limit or inhance a species ability to respond to changes in the physical environment (12 factors). The anticipated directional effect measured whether climate change would have negative, neutral or positive effects on the species productivity. To score climate exposure and climate sensitivity, experts were allowed 5 total tallies to score each of the exposure factor or sensitivity attribute factors. The 5 tallies were then placed into four bins (low, moderate, high, very high), and distributed depending on the expert opinion certainty in the severity of the exposure factor or sensitivity attribute. Scoring for the directional effect was similar, however, experts were only provided 4 total tallies to distribute across three bins (negative, neutral, positive). 
+
+### Port-Gear Type Fishing Activity Footprints
+To calculate changes in fish availability at scales relevant to coastal communities, we defined port by gear type fishing footprints using vessel trip report (VTR) data. All federally permitted vessels are required to submit VTRs to record catch amount and locations. Using these data, we summarized the spatial point location data (proportion of kept catch), by calculating the proportion of reported catch by species - port - and - gear type for grid cells throughout the NELME. This gridded, spatial dataset maintained the same extent and grid resolution of the SST data. 
+
+## Data Analysis
+### Species distribution model: fitting
+There is no shortage of options for tools to fit a statistical species distribution model to species occurrence data. The number of available tools is somewhat overwhelming. With no clear winner or loser, in the end, the decision comes down to tradeoffs and specific analysis goals. In our analysis, we were primarily interested in using a statistical modeling framework that exceled in making predictions, while maintaining the ability to investigate the importance and relationship of different predictor variables to a species distribution and abundance. We also wanted to have some ability to assess variable importance. In contrast, we were not interested in performing traditional hypothesis tests (of parameters or between competing models) or in specific point-parameter estimates.
+
+Based on these interests, we decided to fit delta lognormal generalized additive models (delta GAM). The delta GAM model is a hurdle model, which assumes that there is one process governing the presence/absence of a species and another process that controls the abundance (or biomass) of a species, given that it is present. Within this framework, we modeled both the presence/absence data (i.e., probability of presence) and the log(biomass) given presence (i.e., predicted log(biomass)) using depth, along shelf position, seasonal SST and an interaction between depth and seasonal SST as predictor variables for both model components. Thin-plate regression spline smooth terms, with a basis dimension set to 4, were used for depth, along shelf position and seasonal SST, while a tensor product interaction term was used for the depth by seasonal SST interaction. To allow for differences in species distribution and abundance and the influence of different predictor variables between the two seasons, we fit delta GAM to data from each of the seasons independently. Additionally, we split the datasets into training (1982-2011) and testing (2011-2016) components to assess the predictive ability of the models using the independent testing data. **Insert model formulas**.
+
+To investigate the proportion of deviance explained that could be attributed to SST or the interaction of depth and SST, we also fit a subset model that included all predictor variables except for the SST variables and depth by SST interaction for each species-season. During this process, we fixed the smothing parameters of depth and along shelf position to be equal to the smoothing parameters selected when the global model was fitted. By fixing these smoothing parameters, we insured that the subset model was fully nested within the global model. The proportion of deviance explained by the SST and depth by SST interaction term was then calculated as:  $$prop.dev.exp = \frac{((deviance(subset.model) - deviance(global.model))}{deviance(null.model))}$$
+
+### Species distribution model: evaluation and validation
+We evaluated the fit of each of the global model components (i.e., presence/absence, log(biomass) given presence) by calculating the deviance explained. We then validated each of the model components by using the fitted model to make predictions to the training holdout dataset. For the presence/absence component, we predicted probability of presence as **fill in formula here**. For the log(biomass) given presence, we predicted biomass as: **fill in formula here**. In this formula, the smear component accounts for the potential issues with re-transforming bias when going from log(biomass) to biomass (**insert refs here**). We assessed the model predictive ability by comparing model predictions to the observed presence/absence and biomass using the area under the curve (AUC) and root mean squared error (RMSE) statistics for the presence/absence model component and the RMSE statistic for the log(biomass) model component. The AUC statistic is a threshold-independent rank based classification measure indicating the ability of the model to correctly classify presence locations as having a higher probability of presence than absence locations. The statistic ranges from 0.5 to 1.0, where 0.5 would be a coin flip (no classification skill) and a 1.0 would indicate perfect classification ability (presence locations always have higher probability of presence than absence locations). RMSE, on the other hand, measures the correlation between predicted values and observed values on the scale of the predictions. 
+
+```{r, eval = FALSE}
+mods<- sdm_fit_func("./Data/model.dat.rds", model.framework = "GAM.DLN", split.type = "transfer", train.start<- "1982-01-01", train.end<- "2010-12-31", test.start<- "2011-01-01", test.end<- "2016-01-01")
+```
+
+### Species distribution model: projections
+With the fitted model, we projected species probability of presence and biomass throughout the NELME using depth and along shelf position and then SST data from the mean of the climate models ensemble to spring and fall of 2025, 2040 and 2055. 
+
+```{r, eval = FALSE}
+sdm.preds<- sdm_projection_func(mod.dat =  "./Data/dat.fitted.rds", fall.preds = "./Data/fall.rast.preds06162017.rds", spring.preds = "./Data/spring.rast.preds06162017.rds")
+```
+
+### Merged quantitative and qualitative species distribution projections
+Although we successfully created quantitative species distirbution projections, we also wanted to create species distirbution projections based on the NEVA data, and ultimately, merge the SDM projecitons with the NEVA projections to create one representation of the future. There are a number of possible ways to accomplish these tasks and we spent considerable time exploring different options. These options ranged in their complexity. For example, a simple approach might assign a value between 0-1 to each of the vulnerability ranks and adjust the current predicted probability of presence based on the directional effect and then average this NEVA future with the SDM projections. A more complicated process may instead attempt to create a probability distribution at every grid cell for both the predicted probability of presence (or biomass) and the vulnerability rank and multiply the two probabilities together to get our NEVA future and then combine this future with the SDM projections to get one representation of the future. Ultimately, we wanted to develop a method which 1) used the different results in an approriate way, 2) was objective, and 3) could be easily adapted to other ecosystems. 
+
+In the end, we settled on a merging process that boils down to first creating two independent futures: one "NEVA" future (based on the qualitative expert assessments) and one "SDM" future (based on the quantitative species distribution model projections). Next, rather than just averaging the two futures together, we blended them by accounting for total projected change in availability for each of the futures and adjusting the qunatitative species distribution model projection by the aggregated average change in availability on a cell by cell basis to optain one blended represention of the future. Not only was this a novel approach for including both qualitative expert assessment and quantitative projections, but, it also met all of our method-selection criteria outlined above.
+
+#### Generating a NEVA future, with spatial variability across the NELME
+While the process for getting our "SDM" future was relatively straight forward (see: Species distribution model: projections), generating a "NEVA" future was a bit more involved. This was primarily because we needed to address two major challenges. First, we needed to develop an objective method for translating the vulnerability ranks to a numeric value, which would be on the same scale as the predicted species distribution. Second, we needed to establish how we would apply the new numeric vulnerability values to adjust the predicted species distribution, as this was the only way of creating a NEVA future that contained spatial variability. In other words, after the translation, we would only have one value for the entire NELME unless we applied the translation to the spatially-varying species predicted probability of presence.
+
+To address the first challenge of objectively translating the vulnerability ranks to a numeric value with a range comparable to the predicted probability of presences (0-1), we decided to use the delta GAM projections to calculate a mean translation adjustment value. This mean adjustment considered the relationships among the differences in a species probability of presence between now and 2025, 2040 and 2055 years, the mean vulnerability rank of the species, and the mean directional effect of the species. To start this process, we first looked at relationships between the projected difference in species probability of presence and the NEVA mean directional effect. 
+
+```{r, eval = FALSE}
+sdm.vs.neva<- quant_qual_plots_func(quant.dat = "./Data/sdm.projections.rds", qual.dat = "./Data/neva.boot.results.csv")
+```
+
+```{r, eval = TRUE, fig.align = "center"}
+library(png)
+img <- readPNG("./ExploratoryResults/SDMBWPresenceAdjustment.vs.NEVADirEff.png")
+par(mar = (rep(0,4)))
+plot(1:4, type = "n", xaxt = "n", yaxt = "n", xlab = "", ylab = "", bty = "n")
+rasterImage(img, xleft = 1, ybottom = 0.9, xright = 3.75, ytop = 4)
+```
+
+There was relatively good argreement between the two metrics in this plot, especially for the fall season (top panel). Overall, we predicted declining species probability of presence for species with a negative directional effect and species with increasing probability of presence in 50 years tended to fall into the positive directional effect category. However, things didn't fall out exactly as we had hoped. For example, in the spring season, species with a low vulnerability rank and positive directional effect had a higher average magnitude of change than species with a high vulnerability rank in the same directional effect bin when we would have anticipated the opposite, as species more vulnerable may be likely to have a higher magnitude of change in probability of presence. At the same time, however, the two measures are independent and capturing different processes, so some disagreement is expected.
+
+```{r, eval = TRUE, fig.align = "center"}
+library(png)
+img <- readPNG("./ExploratoryResults/SDMMeanPresenceAdjustment.vs.NEVADirEff.png")
+par(mar = (rep(0,4)))
+plot(1:4, type = "n", xaxt = "n", yaxt = "n", xlab = "", ylab = "", bty = "n")
+rasterImage(img, xleft = 0.9, ybottom = 1, xright = 4.1, ytop = 3.75)
+```
+
+Despite some discrepencies between this plot and our expectations, we still thought that these plots provided the necessary information to objectively translate the NEVA vulnerability ranks to a numeric value. To do this, we cut the mean adjustment range of values at four equally spaced points, resulting in four discrete values. Finally, we assigned these discrete values to each of the four vulnerability ranks, with low vulnerability getting the min value, moderate vulnerability receiving the second lowest value, high vulnerability receiving the second highest value and very high vulnerability getting the max value. 
+
+With the vulnerability ranks translated to a numeric value, overcoming the final challenge of how to adjust the current predicted species distribution based on these translated numeric vulnerability score values was relatively straightforward. We applied the mean adjustment according to the directional effect bin, where for species in the negative directional effect we subtracted the mean adjustment and for species in the positive directional effect bin we added the mean adjustment to the current predicted species distribution. For species in the neutral directional effect bin, we adopted the qunatitative projected species distribution from the species distribution model as our "NEVA future" distribution.
+
+```{r, eval = FALSE}
+neva.proj<- neva_projection_func(qual.spp.path = "./Data/Species.DirEff.VulnRank.Diffs.csv", qual.avg.path =  "./Data/AverageAdjustment.DirEff.VulnRank.csv")
+```
+
+Finally, we combined the NEVA projection with the SDM projection by calculating an average total change in species probability of presence across the NELME using both the NEVA and SDM projections and applied the average probability of presence change to the SDM projections on a cell by cell basis. This process is most easily depicted by the diagram below. In words, the following steps are taken beginning with the current predicted probability of presence (2011-2015) species distribution map:
+
+1. Make SDM projections using projected SST values = P.SDM.FUTURE
+2. Sum P.SDM.FUTURE predicted probabilities over all cells = TOTAL.P.SDM.FUTURE
+3. Make NEVA projections using process outlined above = P.NEVA.FUTURE
+4. Sum P.NEVA.FUTURE predicted probabilities over all cells = TOTAL.P.NEVA.FUTURE
+5. Average TOTAL.P.SDM.FUTURE and TOTAL.P.NEVA.FUTURE, with possible unequal weighting depending on NEVA and SDM certainty = TOTAL.P.AVG
+6. For every cell [x,y], calculate the projected blended probability of presence as
+
+(TOTAL.P.AVG/TOTAL.P.SDM.FUTURE)*P.SDM.FUTURE[x,y]
+
+In picture form, the process looks something like this:
+```{r, fig.align = "left", echo=FALSE}
+library(tiff)
+library(grid)
+img <- readTIFF("./Doc/NEVA_and_SDM_Merging_RoadMap.tiff")
+grid.raster(img)
+```
+
+Make the combined projections.
+```{r, eval = FALSE}
+# Calculate NEVA projections and blended future projections
+combo.proj<- combo_projection_func(neva.projs =  "./Data/neva.projections.rds", sdm.projs = "./Data/sdm.projections.rds")
+```
+
+### Change in species availability within port-gear type fishing activity footprints
+With the combined NEVA and SDM projections, we then calculated the mean change in probability of presence within the port-gear type fishing footprints. This change, which we refer to as a change in fish availability, was calculated using the proportion of reported catch for each port-gear type footprint and the projected change in probability of presence. Specifcially, we used the port-gear type proportion of reported catch footprint as a weight to then calculate the weighted mean change in probability of presence for all future time periods. For each species, this yielded a change in availability for each port-gear type combination that can be interpreted as the average expected change for a random cell within the port-gear type fishing activity footprint. 
+
+```{r, eval = FALSE}
+port.diffs<- port_diffs_func(projections.dat = "./Data/AllProjections.rds", port.foots = "./Data/VTR fishing footprints by community and gear type 2011-2015.rds", plot = FALSE)
+```
+
+# Results
+## SST climate models ensemble projections
+Before digging into the results from our modeling efforts and assessment of the changes in species availability within port-gear type fishing footprints, we first investigated the climate models ensemble projected SST dataset in a bit more detail. For one thing, SST can be an important predictor variable governing species distribution and abundance patterns. For another, it is the only dynamic variable within the delta GAM. Therefore, SST is the only source of potential distribution and abundance changes in the future and understanding climate models ensemble projected SST trends and spatial patterns was important for placing species distribution and abundance shifts in context.
+
+First, we looked at the time series of climate data -- this is raw SST values (sst anomalies added to OISST baseline) by latitudinal band. 
+
+```{r, eval = TRUE, fig.align = "center"}
+library(tidyverse)
+library(raster)
+library(maptools)
+library(scales)
+
+climate.dir<- "~/Dropbox/Andrew/Work/GMRI/COCA/Data/ClimateData/climate.sst.proj.grd"
+sp.in<- "~/Dropbox/Andrew/Work/GMRI/AllGIS/"
+
+## Projections
+proj.wgs84<- CRS("+init=epsg:4326") #WGS84
+proj.utm<- CRS("+init=epsg:2960") #UTM 19
+
+# Climate data
+stack0<- raster::stack(climate.dir)
+clim.dates<- seq.Date(from = as.Date("1982-01-16"), to = as.Date("2099-12-16"), by = "month")
+clim.stack<- raster::setZ(stack0, clim.dates)
+clim.stack.zind<- raster::getZ(clim.stack)
+clim.stack<- projectRaster(clim.stack, crs = proj.wgs84)
+
+# Mask with NELME.shp
+nelme<- readShapePoly("~/GitHub/COCA/Data/nelme.shp")
+clim.stack.m<- raster::mask(clim.stack, nelme, inverse = F)
+clim.stack.m<- raster::setZ(clim.stack.m, clim.dates)
+
+# Latitudinal zones
+zones<- init(clim.stack.m, v='y')
+z<- data.frame(zonal(clim.stack.m, zones, 'mean'))
+names(z)[1]<- "Latitude"
+
+# First row is the latitude band. Other rows are mean temps for each of the layers in the clim.stack.m. Plot monthly means?
+lats.keep<- c(36, 38, 40, 42, 44)
+z.sub<- z[z$Latitude %in% lats.keep,]
+colnames(z.sub)[2:ncol(z.sub)]<- gsub("X", "", colnames(z.sub)[2:ncol(z.sub)])
+
+# Wide to long
+z.sub.l<- z.sub %>%
+  gather(., "Date", "SST", -Latitude) %>%
+  separate(., Date, c("Year", "Month", "Day"), sep = "[.]", remove = FALSE)
+z.sub.l$Date<- as.Date(gsub("[.]", "-", z.sub.l$Date))
+
+z.sub.l$Month <- factor(z.sub.l$Month)
+levels(z.sub.l$Month)<- month.abb
+z.sub.l$Latitude<- factor(z.sub.l$Latitude, levels = c("36", "38", "40", "42", "44"))
+
+# Plot the time series
+zp<- ggplot(z.sub.l, aes(x = Date, y = SST, group = Latitude, color = Latitude)) +
+  scale_color_manual(name = "Latitude Band", values = c('#ca0020','#f4a582','gray','#92c5de','#0571b0')) +
+  scale_x_date(breaks = date_breaks("10 years"), date_labels = "%Y") +
+  geom_line() +
+  facet_wrap(~Month) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust =)) 
+zp
+```
+
+With this panel plot, we see what we would expect, where lower latitudes have warmer temperatures. Further, within each of the latitude bands and across the different panels (months), we see an expected seasonal cycle of temperatures, with SST higher in summer than in the winter. Somewhat interestingly, it does seem like the southern-most band has more stretches with relatively little temperature changes as compared to the other latitude bands, particularly in March and November.
+
+Another way of investigating the the climate models ensemble projected SST data is looking at spatial maps of the seasonal average SST differences between the baseline period (2011-2015) and each of our three time periods of interest, 2025, 2050 and 2055. 
+
+```{r, eval = TRUE}
+clim.stack.m<- raster::mask(clim.stack, nelme, inverse = F)
+
+seasons<- c("Fall", "Spring")
+years<- c("2011", "2012", "2013", "2014", "2015", "2025", "2040", "2055")
+    
+#Baseline stack, store seasonal means and then average them all
+sst.stack<- stack()
+
+for(i in seq_along(seasons)) {
+  season<- seasons[i]
+  
+  for(j in seq_along(years)){
+    dates.use<- switch(season,
+                     "Fall" = as.Date(paste(rep(years[j]), c("09-16", "10-16", "11-16"), sep = "-")),
+                     "Spring" = as.Date(paste(rep(years[j]), c("03-16", "04-16", "05-16"), sep = "-")))
+    sst.temp<- calc(clim.stack.m[[which(clim.stack.zind %in% dates.use)]], mean)
+    sst.stack<- stack(sst.stack, sst.temp)
+    #print(paste(season, years[j], " is done", sep = ""))
+  }
+}
+
+names(sst.stack)<- paste(rep(seasons, each = length(years)), years, sep = ".")
+fall.base.mu<- calc(sst.stack[[1:5]], mean)
+names(fall.base.mu)<- "Fall.Baseline"
+fall.base.df<- as.data.frame(fall.base.mu, xy = TRUE)
+
+fall.diffs<- sst.stack[[6:8]] - fall.base.mu
+names(fall.diffs)<- c("Fall.2025", "Fall.2040", "Fall.2055")
+fall.diffs.df<- as.data.frame(fall.diffs, xy = TRUE) %>%
+  gather(., "Scenario", "SST", -x, -y)
+
+# Plot it
+library(viridis)
+library(cowplot)
+fall.base.plot<- ggplot() + 
+  geom_tile(data = fall.base.df, aes(x = x, y = y, fill = Fall.Baseline), show.legend = TRUE) +
+  scale_fill_viridis(option = "viridis", na.value = "white", limits = c(4, 23)) +
+  geom_map(data = us.states.f, map = us.states.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  geom_map(data = ca.provinces.f, map = ca.provinces.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  ylim(ylim.use) + ylab("Lat") +
+  scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
+  coord_fixed(1.3) + 
+  theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black")) 
+
+fall.diffs.plot<- ggplot() + 
+  geom_tile(data = fall.diffs.df, aes(x = x, y = y, fill = SST), show.legend = TRUE) +
+  scale_fill_gradient2(high = "red", low = "blue", midpoint = 0, na.value = "gray80", limits = c(0, 2)) +
+  geom_map(data = us.states.f, map = us.states.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  geom_map(data = ca.provinces.f, map = ca.provinces.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  ylim(ylim.use) + ylab("Lat") +
+  scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
+  coord_fixed(1.3) + 
+  facet_wrap(~Scenario) +
+  theme(panel.background = element_rect(fill = "gray80", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black")) 
+
+plot_grid(fall.base.plot, fall.diffs.plot, nrow = 2, labels = c("FALL", ""))
+
+spring.base.mu<- calc(sst.stack[[9:13]], mean)
+names(spring.base.mu)<- "Spring.Baseline"
+spring.base.df<- as.data.frame(spring.base.mu, xy = TRUE)
+
+spring.diffs<- sst.stack[[14:16]]-spring.base.mu
+names(spring.diffs)<- c("Spring.2025", "Spring.2040", "Spring.2055")
+spring.diffs.df<- as.data.frame(spring.diffs, xy = TRUE) %>%
+  gather(., "Scenario", "SST", -x, -y)
+
+# Plot it
+library(viridis)
+library(gridExtra)
+spring.base.plot<- ggplot() + 
+  geom_tile(data = spring.base.df, aes(x = x, y = y, fill = Spring.Baseline), show.legend = TRUE) +
+  scale_fill_viridis(option = "viridis", na.value = "white", limits = c(4, 23)) +
+  geom_map(data = us.states.f, map = us.states.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  geom_map(data = ca.provinces.f, map = ca.provinces.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  ylim(ylim.use) + ylab("Lat") +
+  scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
+  coord_fixed(1.3) + 
+  theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black")) 
+
+spring.diffs.plot<- ggplot() + 
+  geom_tile(data = spring.diffs.df, aes(x = x, y = y, fill = SST), show.legend = TRUE) +
+  scale_fill_gradient2(high = "red", low = "blue", midpoint = 0, na.value = "gray80", limits = c(0, 2)) +
+  geom_map(data = us.states.f, map = us.states.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  geom_map(data = ca.provinces.f, map = ca.provinces.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  ylim(ylim.use) + ylab("Lat") +
+  scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
+  coord_fixed(1.3) + 
+  facet_wrap(~Scenario) +
+  theme(panel.background = element_rect(fill = "gray80", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black")) 
+
+plot_grid(spring.base.plot, spring.diffs.plot, nrow = 2, labels = c("SPRING", ""))
+```
+
+The spatial maps look good as we see overall increasing temperatures as we move from 2025 to 2055 in both seasons. Additionally, the amount of warming (~1.5 degC) in 2055 roughly coincides with the expected 3 degC of warming over the next 100 years. Finally, there don't seem to be any "strange" issues with the SST spatial patterns. One interesting thing to note, however, is that temperatures appear to be increasing more rapidly as we move from the southern regions of the NELME to the Gulf of Maine and this spatial variability in warming rates is more explicit in the spring season. 
+
+## Species distribution model: evaluation and validation
+```{r, eval = TRUE}
+library(tidyverse)
+library(stringr)
+
+mod.diag<- read_csv("./Results/GAM.DLN.mod.table.csv")
+mod.diag$Dev.Exp.p[mod.diag$Dev.Exp.p == -Inf]<- NA
+mod.diag$temp.devexp.prop.p[mod.diag$temp.devexp.prop.p > 1 | mod.diag$temp.devexp.prop.p < 0]<- NA
+mod.diag$Dev.Exp.temp.p<- mod.diag$temp.devexp.prop.p * mod.diag$Dev.Exp.p
+mod.diag$temp.devexp.prop.b[mod.diag$temp.devexp.prop.b == -Inf]<- NA
+mod.diag$Dev.Exp.temp.b<- mod.diag$temp.devexp.prop.b * mod.diag$Dev.Exp.b
+
+# Need to move from wide to long for plotting
+mod.diag.l<- mod.diag %>%
+  gather(., "Statistic", "Value", -X1, -COMNAME, -SEASON)
+
+# Join with species functional group info
+func.groups<- read.csv("./Data/JHareSppFunctionalGroup.csv")
+func.groups$COMNAME<- toupper(func.groups$COMNAME)
+
+mod.diag.l<- mod.diag.l %>%
+  left_join(., func.groups, by = "COMNAME")
+
+# Deviance Explained Presence and AUC
+stats<- c("Dev.Exp.p", "Dev.Exp.temp.p", "AUC")
+mod.diag.l$Functional.Group<- factor(mod.diag.l$Functional.Group, levels = c("Diadromous", "Coastal", "Pelagic", "Groundfish", "Invertebrates", "Elasmobranch"))
+
+mod.sub<- mod.diag.l %>%
+  filter(., Statistic %in% stats) %>%
+  arrange(., SEASON, Functional.Group, Statistic, -Value, COMNAME) %>%
+  na.omit()
+mod.sub$COMNAME<- factor(mod.sub$COMNAME, levels = unique(mod.sub$COMNAME))
+
+# Plots -- one for each of the functional groups, seasonal panels...
+for(i in 1:length(unique(mod.sub$Functional.Group))) {
+  group.use<- unique(mod.sub$Functional.Group)[i]
+  temp.devexpl.dat<- mod.sub %>%
+    filter(., Functional.Group == group.use) 
+  plot.out<- ggplot(data = subset(temp.devexpl.dat, Statistic == "Dev.Exp.p"  | Statistic == "Dev.Exp.temp.p"), aes(x = str_to_title(COMNAME), y = Value, fill = Statistic)) +
+    geom_col(position = "stack", width = 0.125) +
+    xlab("Species") +
+    scale_fill_manual(name = "Statistic", values = c("Black", "#377eb8", "#ff7f00")) +
+    scale_y_continuous(name = "Deviance Explained", expand = c(0,0.01), limits = c(0, 110)) +
+    geom_text(data = subset(temp.devexpl.dat, Statistic == "AUC"), aes(x = str_to_title(COMNAME), y = 104, label = format(Value, nsmall = 0, digits = 2, scientific = FALSE))) +
+    facet_wrap(~SEASON, ncol = 6) +
+    theme_bw(base_size = 16) +
+    coord_flip() +
+    ggtitle(paste(group.use)) +
+    theme(plot.title = element_text(hjust = 0.5))
+  
+  #png(file = paste("./Results/", group.use, "DevExpAUC.png", sep = ""), width = 18, height = 14, units = "in", res = 175)
+  plot(plot.out)
+  #dev.off()
+}
+```
+
+## Species distribution model: projections
+Plots are available for all species. Here, we take a look at American lobster and Atlantic cod as both of these have had some issues in the past. In particular, previous models/efforts showed some peaks in probability of presence in non-traditional habitat areas, such as off the coast of North Carolina.
+
+```{r, eval = TRUE}
+spp<- c("american lobster", "atlantic cod")
+files<- paste("./Data/", spp, "ProjectionsandMaps.rds", sep = "")
+
+for(i in seq_along(files)) {
+  print(files[i])
+  plot.dat<- readRDS(files[i])
+  
+  # Typical panel plot: Baseline, SDM.Proj, NEVA.Proj, Combo.Proj and then differences
+  time.scenario.keep<- c("Base", "SDM.2055.Proj", "NEVA.2055.Proj", "Combo.2055.Proj", "SDM.2055.Diff", "NEVA.2055.Diff", "Combo.2055.Diff")
+  plot.dat.sub<- plot.dat %>%
+    filter(., Time.Scenario %in% time.scenario.keep)
+  
+  # Okay, loop over two seasons, one plot for each....
+  library(cowplot)
+  seasons<- c("FALL", "SPRING")
+  
+  for(j in seq_along(seasons)) {
+    dat.temp<- plot.dat.sub %>%
+      filter(., SEASON == seasons[j])
+    
+    pred.legend<- get_legend(dat.temp$Plot[dat.temp$Time.Scenario == "SDM.2055.Proj"][[1]]) 
+    diff.legend<- get_legend(dat.temp$Plot[dat.temp$Time.Scenario == "SDM.2055.Diff"][[1]])
+    
+    # Bottom-right
+    base.plot<- dat.temp$Plot[dat.temp$Time.Scenario == "Base"][[1]] + theme(legend.title = element_blank())
+    proj.plots<- arrangeGrob(plot_grid(dat.temp$Plot[dat.temp$Time.Scenario == "SDM.2055.Proj"][[1]] + theme(legend.position = "none", axis.text.x = element_blank(), axis.text.y = element_blank(), axis.ticks = element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()), 
+                                        dat.temp$Plot[dat.temp$Time.Scenario == "NEVA.2055.Proj"][[1]] + theme(legend.position = "none", axis.text.x = element_blank(), axis.text.y = element_blank(),  axis.ticks = element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()), 
+                                        dat.temp$Plot[dat.temp$Time.Scenario == "Combo.2055.Proj"][[1]] + theme(legend.position = "none", axis.text.x = element_blank(), axis.text.y = element_blank(),  axis.ticks = element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()),
+                                        pred.legend,
+                                        nrow = 1, ncol = 4, scale = 1, labels=c("SDM.2055.Proj", "NEVA.2055.Proj", "Combo.2055.Proj", ""), hjust = -0.4))
+    diff.plots<- arrangeGrob(plot_grid(dat.temp$Plot[dat.temp$Time.Scenario == "SDM.2055.Diff"][[1]] + theme(legend.position = "none", axis.text.x = element_blank(), axis.text.y = element_blank(),  axis.ticks = element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()), 
+                                        dat.temp$Plot[dat.temp$Time.Scenario == "NEVA.2055.Diff"][[1]] + theme(legend.position = "none", axis.text.x = element_blank(), axis.text.y = element_blank(),  axis.ticks = element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()), 
+                                        dat.temp$Plot[dat.temp$Time.Scenario == "Combo.2055.Diff"][[1]] + theme(legend.position = "none", axis.text.x = element_blank(), axis.text.y = element_blank(),  axis.ticks = element_blank(), axis.title.x=element_blank(), axis.title.y=element_blank()),
+                                        diff.legend,
+                                        nrow = 1, ncol = 4, scale = 1, labels=c("SDM.2055.Diff", "NEVA.2055.Diff", "Combo.2055.Diff", ""), hjust = -0.4))
+    tile.plots<- plot_grid(proj.plots, diff.plots, nrow = 2, scale = 1, align = "hv")
+    out<- plot_grid(base.plot, tile.plots, rel_widths = c(0.75,2))
+    #png(file = paste("./Results/", spp[i], seasons[j], ".Map.png", sep = ""), width = 14, height = 10, units = "in", res = 175)
+    plot(out)
+    #dev.off()
+    #print(paste(spp[i], seasons[j], "is done!", sep = " "))
+  }
+  rm(plot.dat)
+}
+```
+
+There is still something strange going on with Atlantic Cod in the spring. We saw this with American Plaice as well. The coordinate for the "weird" projection is -75.19854/34.97094 and the projected probability of presence is 0.7 (baseline). This is very odd since there is very little predicted probabilies greater than 0 south of 37 deg. The SST looks right, with the warmest temps in the region.
+
+```{r, eval = TRUE}
+spring.preds <- readRDS("./Data/spring.rast.preds05222017.rds")
+spring.sst.base<- spring.preds %>%
+  dplyr::select(., x, y, Baseline)
+
+spring.temp<- ggplot() + 
+  geom_point(data = spring.sst.base, aes(x = x, y = y, color = Baseline), shape = 15, size = 25, show.legend = TRUE) +
+  scale_color_viridis(option = "viridis", na.value = "white", limits = c(4, 23)) +
+  geom_map(data = us.states.f, map = us.states.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  geom_map(data = ca.provinces.f, map = ca.provinces.f,
+           aes(map_id = id, group = group),
+           fill = "gray65", color = "gray45", size = 0.15) +
+  ylim(ylim.use) + ylab("Lat") +
+  scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
+  coord_fixed(1.3) + 
+  theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black")) 
+spring.temp
+```
+
+The only other thing I could think of is there is something going on in the fitted model object? The only issue with this train of thought is you would think that it would be pervasive throughout the southern region and not confined to just one specific cell.
+
+```{r, eval = FALSE}
+library(tidyverse)
+dat.fitted<- readRDS("./Data/dat.fitted.rds") %>%
+  dplyr::filter(., COMNAME == "ATLANTIC COD" & SEASON == "SPRING")
+plot(dat.fitted$mod.fitted.p[[1]], pages = 1)
+```
+
+Everything there looks fine, too. I went back to the projections and looked at the data for the trouble point and didn't see anything off base. The interesting thing, though, is that the depth (-121 m) seems to be right at the sweet spot of having a very high p(presence). For example, if I change the depth to -175, the p(presence) decreases to 0.0000003. If I make the depth a bit shallower (-75 m), p(presence) is 0.04. 
+
+I am not sure exactly where that leaves us, but now we know what is going on at least.
+
+** UPDATE 7/23/2017 **
+Yesterday, I did some more digging. Specifically, I looked into the interaction term between depth and SST. The code below pulls out just spring Atlantic cod, fits our model, and then plots the fitted interaction smooth.
+
+```{r, fig.align = "left", echo=FALSE}
+library(mgcv)
+
+## First thought: there is something wrong with the model. Only issue with this: same model for all other species, and all of the predictions, except this one cell, are good. But, lets take a look...
+model.dat<- "~/GitHub/COCA/Data/model.dat.rds"
+model.framework<- "GAM.DLN"
+split.type<- "transfer"
+train.start<- "1982-01-01"
+train.end<- "2010-12-31"
+test.start<- "2011-01-01"
+test.end<- "2016-01-01"
+
+# Get the data
+fish.spp<- read.csv("~/GitHub/COCA/Data/Assesmentfishspecies.csv")
+dat<- readRDS(model.dat) %>% 
+  filter(., SVSPP %in% fish.spp$SVSPP) %>%
+  left_join(., fish.spp, by = "SVSPP") %>%
+  mutate(., "YEAR" = factor(EST_YEAR, levels = seq(from = min(EST_YEAR), to = max(EST_YEAR), by = 1)))
+
+# Split data into testing and training datasets based on the splits ratio or dates
+if(split.type == "random") {
+  n<- nrow(dat)
+  groups<- rep(c("TRAIN", "TEST"), n*c(split, 1-split))
+  dat$TRAIN.TEST<- sample(groups)
+} 
+
+if(split.type == "transfer") {
+  dat$TRAIN.TEST<- ifelse(as.Date(dat$DATE) >= train.start & as.Date(dat$DATE) <= train.end, "TRAIN", 
+                          ifelse(as.Date(dat$DATE) >= test.start & as.Date(dat$DATE) <= test.end, "TEST", "Neither")) 
+}
+
+# Create nested dataframes, one for testing, one for training
+# Training
+dat.train<- dat %>%
+  group_by(., COMNAME, SEASON, TRAIN.TEST) %>%
+  dplyr::filter(., TRAIN.TEST == "TRAIN") %>%
+  nest(.key = "TRAIN.DATA") %>%
+  arrange(COMNAME) %>%
+  filter(., COMNAME == "ATLANTIC COD" & SEASON == "SPRING")
+
+# Testing
+dat.test<- dat %>%
+  group_by(., COMNAME, SEASON, TRAIN.TEST) %>%
+  dplyr::filter(., TRAIN.TEST == "TEST") %>%
+  nest(.key = "TEST.DATA") %>%
+  arrange(COMNAME) %>%
+  filter(., COMNAME == "ATLANTIC COD" & SEASON == "SPRING")
+
+# Fit model
+m1.p <- gam(PRESENCE ~ s(SHELF_POS, k = 4, fx = FALSE, bs = 'tp') + s(DEPTH, k = 4, fx = FALSE, bs = 'tp') + s(SEASONALMU.OISST, k = 4, fx = FALSE, bs = 'tp') + ti(DEPTH, SEASONALMU.OISST, bs = c("tp", "tp")), data = dat.train$TRAIN.DATA[[1]], family = binomial(link = logit), select = TRUE)
+
+# Model details
+summary(m1.p)
+gam.check(m1.p)
+plot.gam(m1.p, pages = 1)
+vis.gam(m1.p, n.grid = 50, theta = 60, phi = 15, zlab = "", view = c("DEPTH", "SEASONALMU.OISST"),
+        ticktype = "detailed", color = "topo", main = "ti(Depth, Seasonal SST)", type = "response")
+```
+
+After making this plot, the obvious question is what the heck is causing that spike in Cod p(presence) in warm and deep waters??? I did some more investigating and there are only 11 observations out of ~9500 used in fitting the model that occur in waters >600 m deep. Not only that, but of these 11 observations, only 2 are "presence" observations and are one Cod caught each. While this brings up the issue of outliers, I wasn't sure of a great way of handing these objectively and across all species. So, I went into the GAM text book and did some more reading. Specifically, I was interested in the smooth function selection and the smooth basis dimension selection.
+
+Instead of fitting a point parameter estimate to the predictor variable, we are fitting smooth functions across the range of observed predictor variables when using a GAM. In doing so, we need to set the smooth function type and there are a few different options. For example, the default is a thin plate regression spline. Other common ones are cubic regression splines and then cyclic cubic regression splines for continuous yearly data. Now, after picking the function, for many function types we can also set the smooth basis dimension, which essentially dictates the "wiggliness" of the function. As an example, when you move from a line to a polynomial, you would be increasing the smooth basis dimension and the wiggliness. There is of course a trade off though, as we don't want the fitted function to be too wiggly that it overfits the data, and in turn, is not generalizable and has poor predictive ability. Now, based on what I had read in some other papers, we used a thin plate regression spline and set the wiggliness to a fixed number (4), although other applications set wiggliness to 7. In any event, I decided to try to let the model select the optimal wiggliness instead of fixing it. Additionally, I moved from using thin plate regression splines to thin plate regression splines with an additional shrinkage penalty. I am by no means an expert on this, but the shrinkage penalty appears to be constructed to allow for the function and all its parameters to go to 0 (i.e., have no influence on the response).
+
+After making those changes, we see that we no longer have the funky Cod in warm, deep waters! Further, we see that instead of the "wiggliness" of 4, the model selects optimal wiggliness of 7-8. This suggests that when we were using the fixed number of 4, we were not allowing the function enough flexibility.
+
+```{r, fig.align = "left", echo=FALSE}
+# Can we get there with increasing "wiggliness" of the GAM?
+m1.p.upk.ts <- gam(PRESENCE ~ s(SHELF_POS, bs = "ts", fx = FALSE) + s(DEPTH, fx = FALSE, bs = "ts") + s(SEASONALMU.OISST, bs = "ts", fx = FALSE) + ti(DEPTH, SEASONALMU.OISST, bs = c("ts", "ts")), data = dat.train$TRAIN.DATA[[1]], family = binomial(link = logit), select = TRUE)
+vis.gam(m1.p.upk.ts, n.grid = 50, theta = 60, phi = 15, zlab = "", view = c("DEPTH", "SEASONALMU.OISST"), ticktype = "detailed", color = "topo", main = "ti(Depth, Seasonal SST)", type = "response")
+```
+
+
