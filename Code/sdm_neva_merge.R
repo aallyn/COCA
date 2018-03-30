@@ -367,7 +367,7 @@ dat.test<- dat %>%
   arrange(COMNAME) 
 
 ## Loop over a few different scenarios...
-dir.scenarios<- data.frame("Dir.Scenario" = c("Negative", "Neutral", "Positive"), "Negative" = c(10, 1, 0), "Neutral" = c(2, 10, 2), "Positive" = c(0, 1, 10))
+dir.scenarios<- data.frame("Dir.Scenario" = c("Negative", "Neutral", "Positive"), "Negative" = c(100, 10, 0), "Neutral" = c(20, 100, 20), "Positive" = c(0, 10, 100))
 nevaV<- NULL
 
 vuln.scenarios<- data.frame("Vuln.Scenario" = c("Low", "Mod", "High", "VeryHigh"), "Low" = c(10, 1, 0, 0), "Mod" = c(2, 10, 1, 0), "High" = c(0, 1, 10, 2), "VeryHigh" = c(0, 0, 1, 10))
@@ -387,14 +387,116 @@ scenarios.c<- scenarios.c %>%
 scenarios.c$Scenario<- paste(scenarios.c$Dir.Scenario, scenarios.c$Vuln.Scenario, sep = ".")
 
 n.chains<- 2
-burn.in<- 2500
-iterations<- 10000
+burn.in<- 3000
+iterations<- 7000
 thin<- 3
 set.seed(13)
 
 scenarios.run<- dir.scenarios
 
+out.dir.stem<- "~/Desktop/MCMC_Results5/"
+
+## Loop
 for(i in 1:nrow(dat.train)){
+  dat.use<- dat.train[i,]
+  season.use<- as.character(dat.use$SEASON[[1]])
+  gam.mod<- gam(PRESENCE.ABUNDANCE ~ s(SHELF_POS.Scale, fx = FALSE, k = 5, bs = 'cs') + s(DEPTH.Scale, k = 5, fx = FALSE, bs = 'cs') + s(SEASONALMU.OISST.Scale, k = 5, fx = FALSE, bs = 'cs'), weights = WT.ABUNDANCE, drop.unused.levels = T, data = dat.use$TRAIN.DATA[[1]], family = binomial(link = logit), select = TRUE)
+  coef.mod<- coef(gam.mod)
+  vc.mod<- vcov(gam.mod)
+  
+  for(j in 1:nrow(scenarios.run)){
+    scenario.use<- scenarios.run[j,]
+    cand.params.start<- list(rmvnorm(1, mean = rnorm(n = length(coef.mod), mean = coef.mod, sd = 3), sigma = vc.mod),
+                             rmvnorm(1, mean = rnorm(n = length(coef.mod), mean = coef.mod, sd = 3), sigma = vc.mod))
+    mcmc.results<- vector("list", n.chains)
+    
+    for(k in 1:n.chains){
+      cand.params.use<- cand.params.start[[k]]
+      rownames(cand.params.use)<- NULL
+      colnames(cand.params.use)<- names(coef.mod)
+      
+      mcmc.results[[k]]<- mh_mcmc(gam.mod = gam.mod, season = season.use, cand.params.start = cand.params.use, base.preds = base.preds, fut.preds = fut.preds, nevaD = c(scenario.use$Negative, scenario.use$Neutral, scenario.use$Positive), nevaV = NULL, iterations = iterations, tune = 0.6)
+    }
+    
+    # Acceptance rate
+    accept.rate<- 1-mean(duplicated(mcmc.results[[1]][2][[1]][-(1:burn.in),]))
+    print(paste(tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), "_", as.character(scenario.use[1,1]), " accept rate = ", accept.rate, sep = ""))
+    
+    # Processing and results plots
+    likes<- list(mcmc.results[[1]][[1]], mcmc.results[[2]][[1]])
+    likes.thin<- lapply(likes, FUN = function(x) data.frame(x))
+    likes.thin<- lapply(likes.thin, FUN = function(x) x[seq(1, nrow(x), thin),])
+    likes.nsamps<- nrow(likes.thin[[1]])
+    
+    posts<- list(mcmc.results[[1]][[2]][burn.in:iterations,], mcmc.results[[2]][[2]][burn.in:iterations,])
+    posts.thin<- lapply(posts, FUN = function(x) data.frame(x))
+    posts.thin<- lapply(posts.thin, FUN = function(x) x[seq(1, nrow(x), thin),])
+    posts.nsamps<- nrow(posts.thin[[1]])
+    
+    # Likes dataframe and plots of mixing
+    likes.df<- data.frame(do.call(rbind, likes.thin))
+    names(likes.df)<- c("Likelihood (NEVA|SDM)", "Prior P(SDM)", "Posterior")
+    likes.df$Iteration<- rep(seq(from = 1, to = likes.nsamps, by = 1), 2)
+    likes.df$Chain<- rep(c("Chain1", "Chain2"), each = likes.nsamps)
+    likes.df<- likes.df %>%
+      gather(., Sample, Value, -Iteration, -Chain)
+    likes.df$Sample<- factor(likes.df$Sample, levels = c("Likelihood (NEVA|SDM)", "Prior P(SDM)", "Posterior"))
+    
+    out.plot<- ggplot(likes.df) +
+      geom_line(aes(x = Iteration, y = Value, color = Chain), alpha = 0.25) +
+      #scale_color_manual(values = c('#4daf4a', '#377eb8', '#e41a1c')) + 
+      ylab("Log Likelihood") + 
+      facet_wrap(~Sample, scales = "free") + 
+      theme_bw()
+    ggsave(paste(out.dir.stem, tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), "_", as.character(scenario.use[1,1]), "_LikePriorPost.jpg", sep = ""), out.plot, width = 11, height = 8, dpi = 125, units = "in")
+    
+    # Plots
+    plot.dat<- data.frame(do.call(rbind, posts.thin))
+    colnames(plot.dat)<- names(coef(gam.mod))
+    plot.dat$Iteration<- rep(seq(from = 1, to = posts.nsamps, by = 1), 2)
+    plot.dat$Chain<- rep(c("Chain1", "Chain2"), each = posts.nsamps)
+    plot.dat<- plot.dat %>%
+      gather(., Parameter, Value, -Iteration, -Chain)
+    plot.dat$Parameter<- factor(plot.dat$Parameter, levels = names(coef(gam.mod)))
+    plot.dat$Chain<- factor(plot.dat$Chain, levels = c("Chain1", "Chain2"))
+    
+    out.plot<- ggplot(plot.dat) + 
+      geom_line(aes(x = Value, color = Chain), stat = "density") +
+      facet_wrap(~Parameter, nrow = 4, scales = "free") + 
+      theme_bw()
+    
+    # Add original means
+    orig<- data.frame("Parameter" = names(coef.mod), "Value" = coef.mod)
+    
+    out.plot2<- out.plot +
+      geom_vline(data = orig, aes(xintercept = Value), color = "black") +
+      facet_wrap(~Parameter, nrow = 4, scales = "free") 
+    ggsave(paste(out.dir.stem, tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), "_", as.character(scenario.use[1,1]), "_PostDist.jpg", sep = ""), out.plot2, width = 11, height = 8, dpi = 125, units = "in")
+    
+    # Iteration series...
+    out.plot<- ggplot(plot.dat) + 
+      geom_line(aes(x = Iteration, y = Value, color = Chain, group = Chain), alpha = 0.4) +
+      scale_x_continuous(breaks = seq(from = 1, to = iterations, by = 1000)) +
+      facet_wrap(~Parameter, nrow = 4, scales = "free") + 
+      theme_bw()
+    ggsave(paste(out.dir.stem, tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), "_", as.character(scenario.use[1,1]), "_PostMix.jpg", sep = ""), out.plot, width = 11, height = 8, dpi = 125, units = "in")
+
+    # Maps
+    source("~/GitHub/COCA/Code/plot_func.R")
+    maps<- plot_func(gam.mod = gam.mod, season = season.use, base.preds = base.preds, fut.preds = fut.preds, out = posts.thin)
+    ggsave(paste(out.dir.stem, tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), "_", as.character(scenario.use[1,1]), "_Maps.jpg", sep = ""), maps, width = 11, height = 8, dpi = 125, units = "in")
+    rm(maps)
+    
+    # Save MCMC results
+    saveRDS(mcmc.results, file = paste(out.dir.stem, "mcmc_", tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), "_", as.character(scenario.use[1,1]), ".rds", sep = ""))
+  }
+}
+
+
+### Parallel processing?
+# Need these results faster, run using multiple cores with a core per species?
+mcmc_func_wrapper<- function(i, dat.train, scenarios.run = scenarios.run, n.chains = 2, burn.in = 2500, iterations = 10000, thin = 3) {
+  
   dat.use<- dat.train[i,]
   season.use<- as.character(dat.use$SEASON[[1]])
   gam.mod<- gam(PRESENCE.ABUNDANCE ~ s(DEPTH.Scale, k = 5, fx = FALSE, bs = 'cs') + s(SEASONALMU.OISST.Scale, k = 5, fx = FALSE, bs = 'cs'), weights = WT.ABUNDANCE, drop.unused.levels = T, data = dat.use$TRAIN.DATA[[1]], family = binomial(link = logit), select = TRUE)
@@ -477,7 +579,7 @@ for(i in 1:nrow(dat.train)){
       facet_wrap(~Parameter, nrow = 4, scales = "free") + 
       theme_bw()
     ggsave(paste("~/Desktop/MCMC_Results2/", tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), "_", as.character(scenario.use[1,1]), "_PostMix.jpg", sep = ""), out.plot, width = 11, height = 8, dpi = 125, units = "in")
-
+    
     # Maps
     source("~/GitHub/COCA/Code/plot_func.R")
     maps<- plot_func(gam.mod = gam.mod, season = season.use, base.preds = base.preds, fut.preds = fut.preds, out = posts.thin)
@@ -489,9 +591,34 @@ for(i in 1:nrow(dat.train)){
   }
 }
 
+## Set up cluster
+library(foreach)
+library(doParallel)
+library(snow)
+library(doSNOW)
+library(tcltk)
+
+# Set up cores
+cores.avail<- detectCores() 
+
+# get the cluster going
+cl <- makeSOCKcluster(cores.avail-2)
+registerDoSNOW(cl)
+
+# Progress bar stuff
+pb<- tkProgressBar(max = nrow(dat.train))
+progress<- function(n) setTkProgressBar(pb, n)
+opts<- list(progress = progress)
+
+# Run sdw_func_wrapper function in parallel
+mcmc_runs<- foreach(i = 1:nrow(dat.train), .packages = c("tidyverse", "mgcv", "mvtnorm", "Smisc", "rgeos", "akima", "sf", "viridis", "cowplot", "corrr", "tcltk"), .combine = rbind.data.frame, .options.snow = opts) %dopar%
+{
+  mcmc_func_wrapper(i, dat.train, scenarios.run = scenarios.run, n.chains = 2, burn.in = 2500, iterations = 10000, thin = 3)
+}
+
 
 ### Fitted GAM smooth function plots...
-t<- list.files(path = "~/Desktop/MCMC_Results/", pattern = ".rds")
+t<- list.files(path = "~/Desktop/MCMC_Results4/", pattern = ".rds")
 
 # Prediction dataframe
 pred.dat.f<- with(fut.preds$Data[[1]],
@@ -519,7 +646,7 @@ rescaled.dat<- bind_rows(rescaled.dat.f, rescaled.dat.s)
 
 ## Original predictions...
 gam_fit_func<- function(mod.data){
-  mod<- gam(PRESENCE ~ s(SHELF_POS.Scale, fx = FALSE, bs = 'cs') + s(DEPTH.Scale, fx = FALSE, bs = 'cs') + s(SEASONALMU.OISST.Scale, fx = FALSE, bs = 'cs'), drop.unused.levels = T, data = mod.data, family = binomial(link = logit), select = TRUE)
+  mod<- gam(PRESENCE ~ s(SHELF_POS.Scale, k = 5, fx = FALSE, bs = 'cs') + s(DEPTH.Scale, fx = FALSE, k = 5, bs = 'cs') + s(SEASONALMU.OISST.Scale, k = 5, fx = FALSE, bs = 'cs'), drop.unused.levels = T, data = mod.data, family = binomial(link = logit), select = TRUE)
   return(mod)
 }
 
@@ -545,21 +672,15 @@ Mode<- function(x) {
   ux[which.max(tabulate(match(x, ux)))]
 }
 
-n.chains<- 2
-burn.in<- 7500
-iterations<- 15000
-thin<- 3
-set.seed(13)
-
 spp.seasons<- paste(rep(spp.example, each = 2), "_", c("FALL", "SPRING"), sep = "")
 
 for(h in seq_along(spp.seasons)){
   spp.season.use<- tolower(spp.seasons[h])
   mod.use<- orig[match(spp.season.use, orig$Spp.Season),]
-  files.list<- list.files(path = "~/Desktop/MCMC_Results/", pattern = ".rds")[grep(spp.season.use, list.files(path = "~/Desktop/MCMC_Results/", pattern = ".rds"))]
+  files.list<- list.files(path = "~/Desktop/MCMC_Results4/", pattern = ".rds")[grep(spp.season.use, list.files(path = "~/Desktop/MCMC_Results4/", pattern = ".rds"))]
 
   for(i in seq_along(files.list)){
-    dat.use<- readRDS(paste("~/Desktop/MCMC_Results/", files.list[[i]], sep = ""))
+    dat.use<- readRDS(paste("~/Desktop/MCMC_Results4/", files.list[[i]], sep = ""))
     
     posts<- list(dat.use[[1]][2][[1]][burn.in:iterations,], dat.use[[2]][2][[1]][burn.in:iterations,])
     posts.thin<- lapply(posts, FUN = function(x) data.frame(x))
@@ -600,7 +721,7 @@ for(h in seq_along(spp.seasons)){
       theme_bw() +
       facet_wrap(~Parameter, scales = "free")
     
-    ggsave(paste("~/Desktop/MCMC_Results/", gsub("mcmc_", "", gsub(".rds", "", files.list[[i]])), "_PredCurv.jpg", sep = ""), out.plot, width = 11, height = 8, dpi = 125, units = "in")
+    ggsave(paste("~/Desktop/MCMC_Results4/", gsub("mcmc_", "", gsub(".rds", "", files.list[[i]])), "_PredCurv.jpg", sep = ""), out.plot, width = 11, height = 8, dpi = 125, units = "in")
   }
 }
 
