@@ -1,10 +1,11 @@
-plot_func<- function(gam.mod, season, base.preds, fut.preds, out) {
+plot_func<- function(gam.mod0, season, base.preds, fut.preds, likes.post, posts.samps) {
   if(FALSE){
-    gam.mod = gam.mod
-    season = "SPRING"
+    gam.mod0 = gam.mod0
+    season = season.use
     base.preds = base.preds
     fut.preds = fut.preds
-    out = posts.thin
+    likes.posts = likes.df[likes.df$Sample == "Posterior",]
+    posts.samps = posts.df
   }
   
   # SDM
@@ -12,14 +13,10 @@ plot_func<- function(gam.mod, season, base.preds, fut.preds, out) {
   fut.map<- data.frame("x" = fut.preds$Data[[match(season, fut.preds$SEASON)]]$x, "y" = fut.preds$Data[[match(season, fut.preds$SEASON)]]$y, "pred" = predict.gam(gam.mod, newdata = fut.preds$Data[[match(season, fut.preds$SEASON)]], type = "response"))
   
   # SDM+NEVA
-  # Get maximimum values from each parameter estimate
-  Mode<- function(x) {
-    ux <- unique(x)
-    ux[which.max(tabulate(match(x, ux)))]
-  }
-  
-  best.fit1<- apply(out[[1]], 2, mean, na.rm = T)
-  best.fit<- matrix(best.fit1, nrow = 1, ncol = length(best.fit1), byrow = T, dimnames = list(NULL, names(coef(gam.mod))))
+  # Get maximimum value and extract row from posts.samps
+  mod.ind<- likes.posts$Iteration[which.max(likes.posts$Value)]
+  best.fit<- posts.samps[mod.ind,]
+  best.fit.mat<- matrix(best.fit, nrow = 1, ncol = length(best.fit), byrow = T, dimnames = list(NULL, names(coef(gam.mod0))))
   
   # Make predictions with these values
   lpmat.base<- predict.gam(gam.mod, newdata = base.preds$Data[[match(season, base.preds$SEASON)]], type = "lpmatrix")
