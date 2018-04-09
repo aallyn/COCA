@@ -1,4 +1,4 @@
-plot_func<- function(gam.mod0, season, base.preds, fut.preds, likes.post, posts.samps) {
+plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.samps) {
   if(FALSE){
     gam.mod0 = gam.mod0
     season = season.use
@@ -9,24 +9,24 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, likes.post, posts.
   }
   
   # SDM
-  base.map<- data.frame("x" = base.preds$Data[[match(season, base.preds$SEASON)]]$x, "y" = base.preds$Data[[match(season, base.preds$SEASON)]]$y, "pred" = predict.gam(gam.mod, newdata = base.preds$Data[[match(season, base.preds$SEASON)]], type = "response"))
-  fut.map<- data.frame("x" = fut.preds$Data[[match(season, fut.preds$SEASON)]]$x, "y" = fut.preds$Data[[match(season, fut.preds$SEASON)]]$y, "pred" = predict.gam(gam.mod, newdata = fut.preds$Data[[match(season, fut.preds$SEASON)]], type = "response"))
+  base.map<- data.frame("x" = base.preds$Data[[match(season, base.preds$SEASON)]]$x, "y" = base.preds$Data[[match(season, base.preds$SEASON)]]$y, "pred" = predict.gam(gam.mod0, newdata = base.preds$Data[[match(season, base.preds$SEASON)]], type = "response"))
+  fut.map<- data.frame("x" = fut.preds$Data[[match(season, fut.preds$SEASON)]]$x, "y" = fut.preds$Data[[match(season, fut.preds$SEASON)]]$y, "pred" = predict.gam(gam.mod0, newdata = fut.preds$Data[[match(season, fut.preds$SEASON)]], type = "response"))
   
   # SDM+NEVA
   # Get maximimum value and extract row from posts.samps
-  mod.ind<- likes.posts$Iteration[which.max(likes.posts$Value)]
+  mod.ind<- like.posts$Iteration[which.max(like.posts$Value)]
   best.fit<- posts.samps[mod.ind,]
-  best.fit.mat<- matrix(best.fit, nrow = 1, ncol = length(best.fit), byrow = T, dimnames = list(NULL, names(coef(gam.mod0))))
+  best.fit.mat<- matrix(best.fit, nrow = 1, ncol = length(best.fit), byrow = T, dimnames = list(NULL, names(coef(gam.mod0, dist))))
   
   # Make predictions with these values
-  lpmat.base<- predict.gam(gam.mod, newdata = base.preds$Data[[match(season, base.preds$SEASON)]], type = "lpmatrix")
+  lpmat.base<- predict.gam(gam.mod0, newdata = base.preds$Data[[match(season, base.preds$SEASON)]], type = "lpmatrix")
   combo.map.base<- data.frame("x" = base.preds$Data[[match(season, base.preds$SEASON)]]$x, "y" = base.preds$Data[[match(season, base.preds$SEASON)]]$y, "pred" = as.numeric(lpmat.base %*% t(best.fit)))
   
-  lpmat.fut<- predict.gam(gam.mod, newdata = fut.preds$Data[[match(season, fut.preds$SEASON)]], type = "lpmatrix")
+  lpmat.fut<- predict.gam(gam.mod0, newdata = fut.preds$Data[[match(season, fut.preds$SEASON)]], type = "lpmatrix")
   combo.map.fut<- data.frame("x" = fut.preds$Data[[match(season, fut.preds$SEASON)]]$x, "y" = fut.preds$Data[[match(season, fut.preds$SEASON)]]$y, "pred" = as.numeric(lpmat.fut %*% t(best.fit)))
   
   # Response scale
-  ilink <- family(gam.mod)$linkinv
+  ilink <- family(gam.mod0)$linkinv
   combo.map.base$pred<- ilink(combo.map.base$pred)
   combo.map.fut$pred<- ilink(combo.map.fut$pred)
   
@@ -96,8 +96,8 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, likes.post, posts.
     geom_map(data = ca.provinces.f, map = ca.provinces.f,
              aes(map_id = id, group = group),
              fill = "gray65", color = "gray45", size = 0.15) +
-    geom_label(aes(x = -73, y = 45), label = paste("Avg P(Pres) = ", round(mean(data.use$pred, na.rm = T), 2), sep = " ")) + 
-    geom_label(aes(x = -73, y = 43), label = paste("Sum P(Pres) = ", round(sum(data.use$pred, na.rm = T), 2), sep = " ")) + 
+    geom_label(aes(x = -73, y = 45), label = paste("Avg P(Pres) = ", round(mean(pred.df.use$z, na.rm = T), 2), sep = " ")) + 
+    geom_label(aes(x = -73, y = 43), label = paste("Sum P(Pres) = ", round(sum(pred.df.use$z, na.rm = T), 2), sep = " ")) + 
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
@@ -135,8 +135,8 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, likes.post, posts.
     geom_map(data = ca.provinces.f, map = ca.provinces.f,
              aes(map_id = id, group = group),
              fill = "gray65", color = "gray45", size = 0.15) +
-    geom_label(aes(x = -73, y = 45), label = paste("Avg P(Pres) = ", round(mean(data.use$pred, na.rm = T), 2), sep = " ")) + 
-    geom_label(aes(x = -73, y = 43), label = paste("Sum P(Pres) = ", round(sum(data.use$pred, na.rm = T), 2), sep = " ")) + 
+    geom_label(aes(x = -73, y = 45), label = paste("Avg P(Pres) = ", round(mean(pred.df.use$z, na.rm = T), 2), sep = " ")) + 
+    geom_label(aes(x = -73, y = 43), label = paste("Sum P(Pres) = ", round(sum(pred.df.use$z, na.rm = T), 2), sep = " ")) + 
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
@@ -173,8 +173,8 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, likes.post, posts.
     geom_map(data = ca.provinces.f, map = ca.provinces.f,
              aes(map_id = id, group = group),
              fill = "gray65", color = "gray45", size = 0.15) +
-    geom_label(aes(x = -73, y = 45), label = paste("Avg P(Pres) = ", round(mean(data.use$pred, na.rm = T), 2), sep = " ")) + 
-    geom_label(aes(x = -73, y = 43), label = paste("Sum P(Pres) = ", round(sum(data.use$pred, na.rm = T), 2), sep = " ")) + 
+    geom_label(aes(x = -73, y = 45), label = paste("Avg P(Pres) = ", round(mean(pred.df.use$z, na.rm = T), 2), sep = " ")) + 
+    geom_label(aes(x = -73, y = 43), label = paste("Sum P(Pres) = ", round(sum(pred.df.use$z, na.rm = T), 2), sep = " ")) + 
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
@@ -211,8 +211,8 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, likes.post, posts.
     geom_map(data = ca.provinces.f, map = ca.provinces.f,
              aes(map_id = id, group = group),
              fill = "gray65", color = "gray45", size = 0.15) +
-    geom_label(aes(x = -73, y = 45), label = paste("Avg P(Pres) = ", round(mean(data.use$pred, na.rm = T), 2), sep = " ")) + 
-    geom_label(aes(x = -73, y = 43), label = paste("Sum P(Pres) = ", round(sum(data.use$pred, na.rm = T), 2), sep = " ")) + 
+    geom_label(aes(x = -73, y = 45), label = paste("Avg P(Pres) = ", round(mean(pred.df.use$z, na.rm = T), 2), sep = " ")) + 
+    geom_label(aes(x = -73, y = 43), label = paste("Sum P(Pres) = ", round(sum(pred.df.use$z, na.rm = T), 2), sep = " ")) + 
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
@@ -250,6 +250,8 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, likes.post, posts.
     geom_map(data = ca.provinces.f, map = ca.provinces.f,
              aes(map_id = id, group = group),
              fill = "gray65", color = "gray45", size = 0.15) +
+    geom_label(aes(x = -73, y = 45), label = paste("Avg Diff Pres = ", round(mean(pred.df.use$z, na.rm = T), 2), sep = " ")) + 
+    geom_label(aes(x = -73, y = 43), label = paste("Sum Abs Diff Pres = ", round(sum(abs(pred.df.use$z), na.rm = T), 2), sep = " ")) + 
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
@@ -280,6 +282,8 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, likes.post, posts.
     geom_map(data = ca.provinces.f, map = ca.provinces.f,
              aes(map_id = id, group = group),
              fill = "gray65", color = "gray45", size = 0.15) +
+    geom_label(aes(x = -73, y = 45), label = paste("Avg Diff Pres = ", round(mean(pred.df.use$z, na.rm = T), 2), sep = " ")) + 
+    geom_label(aes(x = -73, y = 43), label = paste("Sum Abs Diff Pres = ", round(sum(abs(pred.df.use$z), na.rm = T), 2), sep = " ")) + 
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
