@@ -16,11 +16,11 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
   # Get maximimum value and extract row from posts.samps
   mod.ind<- like.posts$Iteration[which.max(like.posts$Value)]
   best.fit<- posts.samps[mod.ind,]
-  best.fit.mat<- matrix(best.fit, nrow = 1, ncol = length(best.fit), byrow = T, dimnames = list(NULL, names(coef(gam.mod0, dist))))
+  best.fit.mat<- matrix(as.numeric(best.fit), nrow = 1, ncol = length(best.fit), byrow = T, dimnames = list(NULL, names(coef(gam.mod0))))
   
   # Make predictions with these values
   lpmat.base<- predict.gam(gam.mod0, newdata = base.preds$Data[[match(season, base.preds$SEASON)]], type = "lpmatrix")
-  combo.map.base<- data.frame("x" = base.preds$Data[[match(season, base.preds$SEASON)]]$x, "y" = base.preds$Data[[match(season, base.preds$SEASON)]]$y, "pred" = as.numeric(lpmat.base %*% t(best.fit)))
+  combo.map.base<- data.frame("x" = base.preds$Data[[match(season, base.preds$SEASON)]]$x, "y" = base.preds$Data[[match(season, base.preds$SEASON)]]$y, "pred" = as.numeric(lpmat.base %*% t(best.fit.mat)))
   
   lpmat.fut<- predict.gam(gam.mod0, newdata = fut.preds$Data[[match(season, fut.preds$SEASON)]], type = "lpmatrix")
   combo.map.fut<- data.frame("x" = fut.preds$Data[[match(season, fut.preds$SEASON)]]$x, "y" = fut.preds$Data[[match(season, fut.preds$SEASON)]]$y, "pred" = as.numeric(lpmat.fut %*% t(best.fit)))
@@ -86,6 +86,8 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
   pred.df.use$breaks<- cut(pred.df.use$z, 
                      breaks = seq(from = 0.0, to = 1.0, by = 0.1), 
                      labels = c("0.0:0.1", "0.1:0.2", "0.2:0.3", "0.3:0.4", "0.4:0.5", "0.5:0.6", "0.6:0.7", "0.7:0.8", "0.8:0.9", "0.9:1.0"), include.lowest = T)
+  pred.df.use<- pred.df.use %>%
+    drop_na(., breaks)
   
   plot.base.sdm<- ggplot() + 
     geom_tile(data = pred.df.use, aes(x = X, y = Y, fill = breaks), show.legend = TRUE) +
@@ -101,7 +103,7 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
-    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.75,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) +
+    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.5, 0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) +
     guides(fill=guide_legend(ncol=2))
   
   # Combo
@@ -124,7 +126,8 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
   pred.df.use$breaks<- cut(pred.df.use$z, 
                            breaks = seq(from = 0.0, to = 1.0, by = 0.1), 
                            labels = c("0.0:0.1", "0.1:0.2", "0.2:0.3", "0.3:0.4", "0.4:0.5", "0.5:0.6", "0.6:0.7", "0.7:0.8", "0.8:0.9", "0.9:1.0"), include.lowest = T)
-  
+  pred.df.use<- pred.df.use %>%
+    drop_na(., breaks)
   
   plot.base.combo<- ggplot() + 
     geom_tile(data = pred.df.use, aes(x = X, y = Y, fill = breaks), show.legend = TRUE) +
@@ -140,7 +143,7 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
-    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.75,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) +
+    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.5,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) +
     guides(fill=guide_legend(ncol=2))
   
   ## Future
@@ -163,6 +166,8 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
   pred.df.use$breaks<- cut(pred.df.use$z, 
                            breaks = seq(from = 0.0, to = 1.0, by = 0.1), 
                            labels = c("0.0:0.1", "0.1:0.2", "0.2:0.3", "0.3:0.4", "0.4:0.5", "0.5:0.6", "0.6:0.7", "0.7:0.8", "0.8:0.9", "0.9:1.0"), include.lowest = T)
+  pred.df.use<- pred.df.use %>%
+    drop_na(., breaks)
   
   plot.fut.sdm<- ggplot() + 
     geom_tile(data = pred.df.use, aes(x = X, y = Y, fill = breaks), show.legend = TRUE) +
@@ -178,7 +183,7 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
-    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.75,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) +
+    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.5,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) +
     guides(fill=guide_legend(ncol=2))
   
   # Combo future
@@ -201,6 +206,8 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
   pred.df.use$breaks<- cut(pred.df.use$z, 
                            breaks = seq(from = 0.0, to = 1.0, by = 0.1), 
                            labels = c("0.0:0.1", "0.1:0.2", "0.2:0.3", "0.3:0.4", "0.4:0.5", "0.5:0.6", "0.6:0.7", "0.7:0.8", "0.8:0.9", "0.9:1.0"), include.lowest = T)
+  pred.df.use<- pred.df.use %>%
+    drop_na(., breaks)
   
   plot.fut.combo<- ggplot() + 
     geom_tile(data = pred.df.use, aes(x = X, y = Y, fill = breaks), show.legend = TRUE) +
@@ -216,7 +223,7 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
-    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.75,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) +
+    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.5,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) +
     guides(fill=guide_legend(ncol=2))
   
   # Differences
@@ -255,7 +262,7 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
-    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.75,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) 
+    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.5,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) 
   
   # Combo
   data.use<- data.frame("x" = combo.map.fut$x, "y" = combo.map.fut$y, "pred" = combo.map.fut$pred - combo.map.base$pred)
@@ -287,7 +294,7 @@ plot_func<- function(gam.mod0, season, base.preds, fut.preds, like.posts, posts.
     ylim(ylim.use) + ylab("Lat") +
     scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
     coord_fixed(1.3) + 
-    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.75,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) 
+    theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.position = c(0.5,0.25), legend.text=element_text(size=10), legend.title=element_text(size=10)) 
   
   out<- plot_grid(plot.base.sdm, plot.fut.sdm, plot.diff.sdm, plot.base.combo, plot.fut.combo, plot.diff.combo, nrow = 2, ncol = 3, align = "hv", scale = 1)
   return(out)
