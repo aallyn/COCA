@@ -23,19 +23,19 @@ est_beta_params_func<- function(mu, var) {
 }
 
 # NegativeLL function -- the likelihood of NEVA votes given the base and future, which comes out of a potential gam model -- combined
-loglike_func<- function(gam.mod0, season, cand.params, base.preds, fut.preds, nevaD, nevaV, base.update, dir.brks, vuln.brks, dist, fix.params = "SEASONALMU.OISST.Scale"){
+loglike_func<- function(gam.mod0, season, cand.params, base.preds, fut.preds, nevaD, nevaV, base.update, dir.brks, vuln.brks, dist, fix.params){
   
   if(FALSE){
-    gam.mod = mod
-    season = "Fall"
-    cand.params = rmvnorm(1, mean = coef.mod, sigma = vc.mod) 
+    gam.mod = gam.mod0
+    season = season.use
+    cand.params = cand.params 
     base.preds = base.preds
     fut.preds = fut.preds
-    nevaD = c(0, 3, 9)
-    nevaV = c(0, 0, 3, 9)
+    nevaD = c(10, 2, 0)
+    nevaV = NULL
     base.update = FALSE
-    dist = "beta"
-    fix.params = "SEASONALMU.OISST.Scale"
+    dist = "norm.diff"
+    fix.params = "All"
   }
   
   # NEVA conversion components
@@ -153,11 +153,54 @@ loglike_func<- function(gam.mod0, season, cand.params, base.preds, fut.preds, ne
       likelihood<- like.dir + like.vuln # Likelihood of getting the directional effect votes and the vulnerability votes
     }
   }
+  
+  if(dist == "norm.diff"){
+    # For proposed GAM, get new baseline and future statistics
+    diff<- base.prob - fut.prob
+    diff.mn<- mean(diff, na.rm = T)
+    diff.sd<- sd(diff, na.rm = T)
+    
+    # Quantiles
+    Dbrks<- quantile(na.omit(diff), prob = c(0.25, 0.75))
+    Vbrks<- quantile(na.omit(diff), prob = seq(from = 0, to = 1, length.out = 6))
+    md<- length(Vbrks)/2+1
+    
+    ## Directional effect piece: likelihood of NEVA votes given our bmn, bsd, fmn, fsd
+    if(!is.null(nevaD)){
+      dtmp<- pnorm(Dbrks, diff.mn, diff.sd)
+      pd<- c(dtmp[1], dtmp[2]-dtmp[1], 1-dtmp[2]) # Per bin probabilities for multinomial distribution
+      like.dir<- dmultinom(nevaD, prob = pd, log = TRUE) # Likelihood of observed directional effect NEVA votes given multinomial described by pd per bin probabilities
+    }
+    
+    ## Vulnerability piece
+    if(!is.null(nevaV)){
+      vtmp<- pnorm(Vbrks, diff.mn, diff.sd) # Cumulative distribution function, p(x) <= each value supplied in Vbrks
+      vtmp<- c(vtmp[1], diff(vtmp), 1-vtmp[length(vtmp)])
+      
+      # Storage vector --  allows for more than 4 vulnerability categories, returns probability of being in each bin
+      vd<- rep(NA, md)
+      vd[1]<- vtmp[md]
+      
+      for(k in 1:(md-1)){
+        vd[k+1]<- vtmp[md+k]+vtmp[md-k]
+      }
+      
+      like.vuln<- dmultinom(nevaV, prob = vd, log = TRUE) # Likelihood of observed vulnerability NEVA votes given multinomial described by pd per bin probabilities
+    }
+    
+    if(is.null(nevaD)){
+      likelihood<- like.vuln
+    } else if(is.null(nevaV)){
+      likelihood<- like.dir
+    } else {
+      likelihood<- like.dir + like.vuln # Likelihood of getting the directional effect votes and the vulnerability votes
+    }
+  }
   return(likelihood) # Loglikelihood
 }
 
 # Probability of our model 
-logprior_func<- function(gam.mod0, cand.params, fix.params = "SEASONALMU.OISST.Scale"){
+logprior_func<- function(gam.mod0, cand.params, fix.params){
   # Likelihood of the GAM baseline future (fitted curves)
   # Gather coefficiences and varcov matrix, needed to define the normal dist of each candidate parameter value
   coefs.mod<- coef(gam.mod0) # Coefficients for every term/basis function in the model
@@ -169,7 +212,7 @@ logprior_func<- function(gam.mod0, cand.params, fix.params = "SEASONALMU.OISST.S
 }
 
 # Posterior (loglike + logprior)
-logposterior_func<- function(gam.mod0, season, cand.params, base.preds, fut.preds, nevaD, nevaV, base.update, dir.brks, vuln.brks, dist, fix.params = "SEASONALMU.OISST.Scale"){
+logposterior_func<- function(gam.mod0, season, cand.params, base.preds, fut.preds, nevaD, nevaV, base.update, dir.brks, vuln.brks, dist, fix.params){
   # Likelihood of NEVA dir and vuln votes, given GAM baseline future (fitted curves)
   if(class(cand.params) == "numeric"){
     cand.params<- matrix(cand.params, nrow = 1, ncol = length(cand.params), byrow = T, dimnames = list(NULL, names(coef(gam.mod0))))
@@ -185,7 +228,7 @@ logposterior_func<- function(gam.mod0, season, cand.params, base.preds, fut.pred
 }
 
 # Bayes Algorithm
-sdm_neva_bayes<- function(gam.mod0, season, cand.params, base.preds, fut.preds, nevaD, nevaV, base.update, dir.brks, vuln.brks, dist, fix.params = "SEASONALMU.OISST.Scale"){
+sdm_neva_bayes<- function(gam.mod0, season, cand.params, base.preds, fut.preds, nevaD, nevaV, base.update, dir.brks, vuln.brks, dist, fix.params){
   
   # Calculate likelihood, prior and posterior given candidate
   post<- logposterior_func(gam.mod0, season, cand.params, base.preds, fut.preds, nevaD, nevaV, base.update, dir.brks, vuln.brks, dist, fix.params)
@@ -222,12 +265,32 @@ base.preds.f<- fall.preds %>%
 base.preds<- base.preds.f %>%
   bind_rows(., base.preds.sp)
 
+# Future -- need to scale based on values from the 
+fut.temp.scale<- function(fut.temp, base.temp.mean, base.temp.sd){
+  if(is.na(fut.temp)){
+    temp.scaled<- NA
+    return(temp.scaled)
+  } else {
+    temp.scaled<- (fut.temp - base.temp.mean)/base.temp.sd
+    return(temp.scaled)
+  }
+}
+
+base.temp.mean.sp<- mean(base.preds[base.preds$SEASON == "SPRING",]$Data[[1]]$Baseline, na.rm = T)
+base.temp.sd.sp<- sd(base.preds[base.preds$SEASON == "SPRING",]$Data[[1]]$Baseline, na.rm = T)
+spring.rescale.df<- data.frame(SEASON = "SPRING", mean = base.temp.mean.sp, sd = base.temp.sd.sp)
+base.temp.mean.f<- mean(base.preds[base.preds$SEASON == "FALL",]$Data[[1]]$Baseline, na.rm = T)
+base.temp.sd.f<- sd(base.preds[base.preds$SEASON == "FALL",]$Data[[1]]$Baseline, na.rm = T)
+fall.rescale.df<- data.frame(SEASON = "FALL", mean = base.temp.mean.f, sd = base.temp.sd.f)
+
 fut.preds.sp<- spring.preds %>%
   dplyr::select(., x, y, Spring.2055, DEPTH, SHELF_POS) %>%
   mutate(., "SHELF_POS.Scale" = as.numeric(scale(SHELF_POS)),
          "DEPTH.Scale" = as.numeric(scale(abs(DEPTH))),
-         "SEASONALMU.OISST.Scale" = as.numeric(scale(Spring.2055)),
          "SEASON" = rep("SPRING", nrow(.))) %>%
+  left_join(., spring.rescale.df, by = "SEASON")
+fut.preds.sp$SEASONALMU.OISST.Scale<- mapply(fut.temp.scale, fut.preds.sp$Spring.2055, fut.preds.sp$mean, fut.preds.sp$sd)
+fut.preds.sp<- fut.preds.sp %>%
   group_by(., SEASON) %>%
   nest(.key = "Data")
 
@@ -235,14 +298,15 @@ fut.preds.f<- fall.preds %>%
   dplyr::select(., x, y, Fall.2055, DEPTH, SHELF_POS) %>%
   mutate(., "SHELF_POS.Scale" = as.numeric(scale(SHELF_POS)),
          "DEPTH.Scale" = as.numeric(scale(abs(DEPTH))),
-         "SEASONALMU.OISST.Scale" = as.numeric(scale(Fall.2055)),
          "SEASON" = rep("FALL", nrow(.))) %>%
+  left_join(., fall.rescale.df, by = "SEASON")
+fut.preds.f$SEASONALMU.OISST.Scale<- mapply(fut.temp.scale, fut.preds.f$Fall.2055, fut.preds.f$mean, fut.preds.f$sd)
+fut.preds.f<- fut.preds.f %>%
   group_by(., SEASON) %>%
   nest(.key = "Data")
 
 fut.preds<- fut.preds.f %>%
   bind_rows(., fut.preds.sp)
-
 
 ## Also going to want these as prediction dataframes...
 # Prediction dataframe
@@ -276,6 +340,7 @@ dat.path<- "~/GitHub/COCA/Data/model.dat.rds"
 # Fish assessment species
 fish.spp<- read.csv("~/GitHub/COCA/Data/Assesmentfishspecies.csv")
 spp.example<- c("ATLANTIC COD", "SUMMER FLOUNDER", "LONGFIN SQUID", "AMERICAN LOBSTER")
+
 
 # Read it in, filter to one species, do some quick formatting to fit the GAM
 dat<- readRDS(dat.path) %>% 
@@ -373,8 +438,8 @@ base.update.use<- TRUE
 dist.use<- "beta"
 dir.brks.use<- c(-1, 1)
 vuln.brks.use<- c(-3, -2, -1, 1, 2, 3)
-out.dir.stem<- "~/Desktop/100xVotingBetaDist/"
-fix.params<- "SEASONALMU.OISST.Scale"
+out.dir.stem<- "~/Desktop/NormalVoting_Beta_IncKnots_041218/"
+fix.params<- NULL
 
 if(dir.exists(out.dir.stem)){
   print("Directory Exists")
@@ -389,27 +454,46 @@ for(i in 1:nrow(dat.train)){
   # Get the data and fit the model
   dat.use<- dat.train[i,]
   season.use<- as.character(dat.use$SEASON[[1]])
-  gam.mod0<- gam(PRESENCE.ABUNDANCE ~ s(SHELF_POS.Scale, fx = FALSE, k = 5, bs = 'cs') + s(DEPTH.Scale, k = 5, fx = FALSE, bs = 'cs') + s(SEASONALMU.OISST.Scale, k = 5, fx = FALSE, bs = 'cs'), drop.unused.levels = T, data = dat.use$TRAIN.DATA[[1]], family = binomial(link = logit), select = TRUE)
+  gam.mod0<- gam(PRESENCE.ABUNDANCE ~ s(SHELF_POS.Scale, fx = FALSE, bs = 'cs') + s(DEPTH.Scale, fx = FALSE, bs = 'cs') + s(SEASONALMU.OISST.Scale, fx = FALSE, bs = 'cs'), drop.unused.levels = T, data = dat.use$TRAIN.DATA[[1]], family = binomial(link = logit), select = TRUE)
   coef.mod0<- coef(gam.mod0)
   vc.mod0<- vcov(gam.mod0)
+  saveRDS(gam.mod0, file = paste(out.dir.stem, "gamfit", tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), ".rds", sep = ""))
   
   # Draws of candidate models from the posterior
   cand.params.all<- rmvnorm(mod.sims, mean = coef.mod0, sigma = vc.mod0) 
   
   # Fix any of these?
   if(!is.null(fix.params)){
-    # Modify to match column names of cand.params
-    fix.params.use<- paste(paste("s(", fix.params, ")", sep = ""), ".", seq(from = 1, to = 4, by = 1), sep = "")
-    
-    # Cand.params.all index...
-    cand.params.all.ind<- which(colnames(cand.params.all) %in% fix.params.use, arr.ind = T)
-    
-    # Coef index
-    coef.mod0.fix<- coef.mod0[names(coef.mod0) %in% fix.params.use]
-    coef.mod0.fix.mat<- matrix(coef.mod0.fix, nrow = 1, ncol = 4, byrow = T)
-    
-    # Move over values
-    cand.params.all[,cand.params.all.ind]<- coef.mod0.fix.mat[rep(1:nrow(coef.mod0.fix.mat), times = nrow(cand.params.all)),]
+    if(fix.params == "All"){
+      # Modify to match all column names of cand.params except intercept
+      fix.params.use<- names(coef.mod0)[-which(names(coef.mod0) %in% "(Intercept)")]
+      
+      # Cand.params.all index...
+      cand.params.all.ind<- which(colnames(cand.params.all) %in% fix.params.use, arr.ind = T)
+      
+      # Coef index
+      coef.mod0.fix<- coef.mod0[names(coef.mod0) %in% fix.params.use]
+      coef.mod0.fix.mat<- matrix(coef.mod0.fix, nrow = 1, ncol = 27, byrow = T)
+      
+      # Move over values
+      cand.params.all[,cand.params.all.ind]<- coef.mod0.fix.mat[rep(1:nrow(coef.mod0.fix.mat), times = nrow(cand.params.all)),]
+      
+      # Randomly generate intercept values...
+      cand.params.all[,1]<- runif(mod.sims, -3, 3)
+    } else {
+      # Modify to match column names of cand.params
+      fix.params.use<- paste(paste("s(", fix.params, ")", sep = ""), ".", seq(from = 1, to = 4, by = 1), sep = "")
+      
+      # Cand.params.all index...
+      cand.params.all.ind<- which(colnames(cand.params.all) %in% fix.params.use, arr.ind = T)
+      
+      # Coef index
+      coef.mod0.fix<- coef.mod0[names(coef.mod0) %in% fix.params.use]
+      coef.mod0.fix.mat<- matrix(coef.mod0.fix, nrow = 1, ncol = 4, byrow = T)
+      
+      # Move over values
+      cand.params.all[,cand.params.all.ind]<- coef.mod0.fix.mat[rep(1:nrow(coef.mod0.fix.mat), times = nrow(cand.params.all)),]
+    }
   }
   
   for(j in 1:nrow(scenarios.run)){
@@ -427,11 +511,11 @@ for(i in 1:nrow(dat.train)){
       } 
       
       if(scenarios.type == "Vuln"){
-        out.likes[k,]<- sdm_neva_bayes(gam.mod0, season = season.use, cand.params, base.preds, fut.preds, nevaD = NULL, nevaV = c(scenario.use$Low, scenario.use$Mod, scenario.use$High, scenario.use$VeryHigh), base.update = base.update.use, dir.brks = dir.brks.use, vuln.brks = vuln.brks.use, dist = dist.use)
+        out.likes[k,]<- sdm_neva_bayes(gam.mod0, season = season.use, cand.params, base.preds, fut.preds, nevaD = NULL, nevaV = c(scenario.use$Low, scenario.use$Mod, scenario.use$High, scenario.use$VeryHigh), base.update = base.update.use, dir.brks = dir.brks.use, vuln.brks = vuln.brks.use, dist = dist.use, fix.params = fix.params)
       }
       
       if(scenarios.type == "Both"){
-        out.likes[k,]<- sdm_neva_bayes(gam.mod0, season = season.use, cand.params, base.preds, fut.preds, nevaD = c(scenario.use$Negative, scenario.use$Neutral, scenario.use$Positive), nevaV = c(scenario.use$Low, scenario.use$Mod, scenario.use$High, scenario.use$VeryHigh), base.update = base.update.use, dir.brks = dir.brks.use, vuln.brks = vuln.brks.use, dist = dist.use)
+        out.likes[k,]<- sdm_neva_bayes(gam.mod0, season = season.use, cand.params, base.preds, fut.preds, nevaD = c(scenario.use$Negative, scenario.use$Neutral, scenario.use$Positive), nevaV = c(scenario.use$Low, scenario.use$Mod, scenario.use$High, scenario.use$VeryHigh), base.update = base.update.use, dir.brks = dir.brks.use, vuln.brks = vuln.brks.use, dist = dist.use, fix.params = fix.params)
       }
     }
     
@@ -583,3 +667,5 @@ for(i in 1:nrow(dat.train)){
     saveRDS(mcmc.results, file = paste(out.dir.stem, "mcmc_", tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), "_", as.character(scenario.use$Scenario), ".rds", sep = ""))
   }
 }
+
+
