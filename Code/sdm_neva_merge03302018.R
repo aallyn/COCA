@@ -13,6 +13,7 @@ library(sf)
 library(viridis)
 library(cowplot)
 library(corrr)
+library(maptools)
 
 ## Core functions
 # Beta parameterization from mean and variance
@@ -34,7 +35,7 @@ loglike_func<- function(gam.mod0, season, cand.params, base.preds, fut.preds, ne
     nevaD = c(10, 2, 0)
     nevaV = NULL
     base.update = FALSE
-    dist = "norm.diff"
+    dist = "beta"
     fix.params = "All"
   }
   
@@ -118,7 +119,7 @@ loglike_func<- function(gam.mod0, season, cand.params, base.preds, fut.preds, ne
     base.params<- est_beta_params_func(mu = bmn, var = bsd^2)
     fut.params<- est_beta_params_func(mu = fmn, var = fsd^2)
     
-    Dbrks<- quantile(na.omit(base.prob), prob = c(0.25, 0.75))
+    Dbrks<- quantile(na.omit(base.prob), prob = c(0.33, 0.67))
     Vbrks<- quantile(na.omit(base.prob), prob = seq(from = 0, to = 1, length.out = 6))
     md<- length(Vbrks)/2+1
     
@@ -236,6 +237,137 @@ sdm_neva_bayes<- function(gam.mod0, season, cand.params, base.preds, fut.preds, 
   return(likes)
 }
 
+temp.scale<- function(new.temp, base.temp.mean, base.temp.sd){
+  if(is.na(new.temp)){
+    temp.scaled<- NA
+    return(temp.scaled)
+  } else {
+    temp.scaled<- (new.temp - base.temp.mean)/base.temp.sd
+    return(temp.scaled)
+  }
+}
+
+#### A few examples
+# Data path
+dat.path<- "~/GitHub/COCA/Data/model.dat.rds"
+
+# Fish assessment species
+fish.spp<- read.csv("~/GitHub/COCA/Data/Assesmentfishspecies.csv")
+spp.example<- c("ATLANTIC COD", "SUMMER FLOUNDER", "LONGFIN SQUID", "AMERICAN LOBSTER")
+
+# Read it in, filter to one species, do some quick formatting to fit the GAM
+dat<- readRDS(dat.path) %>% 
+  filter(., SVSPP %in% fish.spp$SVSPP) %>%
+  left_join(., fish.spp, by = "SVSPP") 
+
+# Training vs. testing
+train.start<- "1982-01-01"
+train.end<- "2010-12-31"
+test.start<- "2011-01-01"
+test.end<- "2016-01-01"
+
+dat$TRAIN.TEST<- ifelse(as.Date(dat$DATE) >= train.start & as.Date(dat$DATE) <= train.end, "TRAIN", 
+                        ifelse(as.Date(dat$DATE) >= test.start & as.Date(dat$DATE) <= test.end, "TEST", "Neither"))
+
+# Bottom trawl strata
+bstrat<- st_read("./Data/BottomTrawlStrata/BTS_Strata.shp")
+
+# Get names of strata
+bstrat.names<- unique(bstrat$STRATA)
+
+# Reduce dataset
+dat<- dat[dat$STRATUM %in% bstrat.names,]
+
+# Training data
+dat.train.f<- dat %>%
+  filter(., TRAIN.TEST == "TRAIN" & SEASON == "FALL") %>%
+  mutate(., "YEAR" = factor(EST_YEAR, levels = seq(from = min(EST_YEAR), to = max(EST_YEAR), by = 1)),
+         "STRATUM.FACTOR" = factor(STRATUM, levels = unique(STRATUM)),
+         "SED.SIZE" = factor(SED.SIZE, levels = unique(SED.SIZE)),
+         "SHELF_POS.Scale" = as.numeric(scale(SHELF_POS)),
+         "DEPTH.Scale" = as.numeric(scale(abs(DEPTH))),
+         "SEASONALMU.OISST.Scale" = as.numeric(scale(SEASONALMU.OISST))) %>%
+  filter(., COMNAME %in% spp.example)
+dat.train.f$PRESENCE.ABUNDANCE<- ifelse(dat.train.f$ABUNDANCE > 0, 1, 0)
+dat.train.f$WT.ABUNDANCE<- ifelse(dat.train.f$PRESENCE.ABUNDANCE == 0, 1, dat.train.f$ABUNDANCE)
+
+# Temps to rescale other time periods
+base.depth.mean.f<- mean(abs(dat.train.f$DEPTH))
+base.depth.sd.f<- sd(abs(dat.train.f$DEPTH))
+base.shelf.mean.f<- mean(dat.train.f$SHELF_POS)
+base.shelf.sd.f<- sd(dat.train.f$SHELF_POS)
+base.temp.mean.f<- mean(dat.train.f$SEASONALMU.OISST, na.rm = T)
+base.temp.sd.f<- sd(dat.train.f$SEASONALMU.OISST, na.rm = T)
+fall.rescale.df<- data.frame(SEASON = "FALL", mean.t = base.temp.mean.f, sd.t = base.temp.sd.f, mean.depth = base.depth.mean.f, sd.depth = base.depth.sd.f, mean.shelf = base.shelf.mean.f, sd.shelf = base.shelf.sd.f)
+
+dat.train.s<- dat %>%
+  filter(., TRAIN.TEST == "TRAIN" & SEASON == "SPRING") %>%
+  mutate(., "YEAR" = factor(EST_YEAR, levels = seq(from = min(EST_YEAR), to = max(EST_YEAR), by = 1)),
+         "STRATUM.FACTOR" = factor(STRATUM, levels = unique(STRATUM)),
+         "SED.SIZE" = factor(SED.SIZE, levels = unique(SED.SIZE)),
+         "SHELF_POS.Scale" = as.numeric(scale(SHELF_POS)),
+         "DEPTH.Scale" = as.numeric(scale(abs(DEPTH))),
+         "SEASONALMU.OISST.Scale" = as.numeric(scale(SEASONALMU.OISST))) %>%
+  filter(., COMNAME %in% spp.example)
+dat.train.s$PRESENCE.ABUNDANCE<- ifelse(dat.train.s$ABUNDANCE > 0, 1, 0)
+dat.train.s$WT.ABUNDANCE<- ifelse(dat.train.s$PRESENCE.ABUNDANCE == 0, 1, dat.train.s$ABUNDANCE)
+
+# Temps to rescale other variables
+base.depth.mean.sp<- mean(abs(dat.train.s$DEPTH))
+base.depth.sd.sp<- sd(abs(dat.train.s$DEPTH))
+base.shelf.mean.sp<- mean(dat.train.s$SHELF_POS)
+base.shelf.sd.sp<- sd(dat.train.s$SHELF_POS)
+base.temp.mean.sp<- mean(dat.train.s$SEASONALMU.OISST, na.rm = T)
+base.temp.sd.sp<- sd(dat.train.s$SEASONALMU.OISST, na.rm = T)
+spring.rescale.df<- data.frame(SEASON = "SPRING", mean.t = base.temp.mean.sp, sd.t = base.temp.sd.sp, mean.depth = base.depth.mean.sp, sd.depth = base.depth.sd.sp, mean.shelf = base.shelf.mean.sp, sd.shelf = base.shelf.sd.sp)
+
+## Testing dataframes
+dat.test.f<- dat %>%
+  filter(., TRAIN.TEST == "TEST" & SEASON == "FALL") %>%
+  mutate(., "YEAR" = factor(EST_YEAR, levels = seq(from = min(EST_YEAR), to = max(EST_YEAR), by = 1)),
+         "STRATUM.FACTOR" = factor(STRATUM, levels = unique(STRATUM)),
+         "SED.SIZE" = factor(SED.SIZE, levels = unique(SED.SIZE))) %>%
+  left_join(., fall.rescale.df, by = "SEASON")
+dat.test.f$DEPTH.Scale<- mapply(temp.scale, abs(dat.test.f$DEPTH), fall.rescale.df$mean.depth, fall.rescale.df$sd.depth)
+dat.test.f$SHELF_POS.Scale<- mapply(temp.scale, dat.test.f$SHELF_POS, fall.rescale.df$mean.shelf, fall.rescale.df$sd.shelf)
+dat.test.f$SEASONALMU.OISST.Scale<- mapply(temp.scale, dat.test.f$SEASONALMU.OISST, fall.rescale.df$mean.t, fall.rescale.df$sd.t)
+
+dat.test.f<- dat.test.f %>%
+  filter(., COMNAME %in% spp.example)
+dat.test.f$PRESENCE.ABUNDANCE<- ifelse(dat.test.f$ABUNDANCE > 0, 1, 0)
+dat.test.f$WT.ABUNDANCE<- ifelse(dat.test.f$PRESENCE.ABUNDANCE == 0, 1, dat.test.f$ABUNDANCE)
+
+## Testing dataframes
+dat.test.s<- dat %>%
+  filter(., TRAIN.TEST == "TEST" & SEASON == "SPRING") %>%
+  mutate(., "YEAR" = factor(EST_YEAR, levels = seq(from = min(EST_YEAR), to = max(EST_YEAR), by = 1)),
+         "STRATUM.FACTOR" = factor(STRATUM, levels = unique(STRATUM)),
+         "SED.SIZE" = factor(SED.SIZE, levels = unique(SED.SIZE))) %>%
+  left_join(., spring.rescale.df, by = "SEASON")
+dat.test.s$DEPTH.Scale<- mapply(temp.scale, abs(dat.test.s$DEPTH), spring.rescale.df$mean.depth, spring.rescale.df$sd.depth)
+dat.test.s$SHELF_POS.Scale<- mapply(temp.scale, dat.test.s$SHELF_POS, spring.rescale.df$mean.shelf, spring.rescale.df$sd.shelf)
+dat.test.s$SEASONALMU.OISST.Scale<- mapply(temp.scale, dat.test.s$SEASONALMU.OISST, spring.rescale.df$mean.t, spring.rescale.df$sd.t)
+
+dat.test.s<- dat.test.s %>%
+  filter(., COMNAME %in% spp.example)
+dat.test.s$PRESENCE.ABUNDANCE<- ifelse(dat.test.s$ABUNDANCE > 0, 1, 0)
+dat.test.s$WT.ABUNDANCE<- ifelse(dat.test.s$PRESENCE.ABUNDANCE == 0, 1, dat.test.s$ABUNDANCE)
+
+# Create nested dataframes, one for testing, one for training
+# Training
+dat.train<- dat.train.f %>%
+  bind_rows(., dat.train.s) %>%
+  group_by(., COMNAME, SEASON) %>%
+  nest(.key = "TRAIN.DATA") %>%
+  arrange(COMNAME)
+
+# Testing
+dat.test<- dat.test.f %>%
+  bind_rows(., dat.test.s) %>%
+  group_by(., COMNAME, SEASON) %>%
+  nest(.key = "TEST.DATA") %>%
+  arrange(COMNAME) 
+
 # Running the sdm_neva_bayes function. Easiest to map this function??
 # Need base.preds, fut.preds, nevaD and nevaV
 spring.preds = "~/Dropbox/Andrew/Work/GMRI/AllData/spring.rast.preds03232018.rds"
@@ -246,61 +378,51 @@ fall.preds<- readRDS(fall.preds)
 
 base.preds.sp<- spring.preds %>%
   dplyr::select(., x, y, Baseline, DEPTH, SHELF_POS) %>%
-  mutate(., "SHELF_POS.Scale" = as.numeric(scale(SHELF_POS)),
-         "DEPTH.Scale" = as.numeric(scale(abs(DEPTH))),
-         "SEASONALMU.OISST.Scale" = as.numeric(scale(Baseline)),
-         "SEASON" = rep("SPRING", nrow(.))) %>%
+  mutate(., "SEASON" = rep("SPRING", nrow(.)))
+
+base.preds.sp<- base.preds.sp %>%
+  left_join(., spring.rescale.df, by = "SEASON")
+base.preds.sp$DEPTH.Scale<- mapply(temp.scale, abs(base.preds.sp$DEPTH), spring.rescale.df$mean.depth, spring.rescale.df$sd.depth)
+base.preds.sp$SHELF_POS.Scale<- mapply(temp.scale, base.preds.sp$SHELF_POS, spring.rescale.df$mean.shelf, spring.rescale.df$sd.shelf)
+base.preds.sp$SEASONALMU.OISST.Scale<- mapply(temp.scale, base.preds.sp$Baseline, spring.rescale.df$mean.t, spring.rescale.df$sd.t)
+
+base.preds.sp<- base.preds.sp %>%
   group_by(., SEASON) %>%
   nest(.key = "Data")
 
 base.preds.f<- fall.preds %>%
   dplyr::select(., x, y, Baseline, DEPTH, SHELF_POS) %>%
-  mutate(., "SHELF_POS.Scale" = as.numeric(scale(SHELF_POS)),
-         "DEPTH.Scale" = as.numeric(scale(abs(DEPTH))),
-         "SEASONALMU.OISST.Scale" = as.numeric(scale(Baseline)),
-         "SEASON" = rep("FALL", nrow(.))) %>%
+  mutate(., "SEASON" = rep("FALL", nrow(.))) 
+base.preds.f$DEPTH.Scale<- mapply(temp.scale, abs(base.preds.f$DEPTH), fall.rescale.df$mean.depth, fall.rescale.df$sd.depth)
+base.preds.f$SHELF_POS.Scale<- mapply(temp.scale, base.preds.f$SHELF_POS, fall.rescale.df$mean.shelf, fall.rescale.df$sd.shelf)
+base.preds.f$SEASONALMU.OISST.Scale<- mapply(temp.scale, base.preds.f$Baseline, fall.rescale.df$mean.t, fall.rescale.df$sd.t)
+base.preds.f<- base.preds.f %>%
   group_by(., SEASON) %>%
   nest(.key = "Data")
 
 base.preds<- base.preds.f %>%
   bind_rows(., base.preds.sp)
 
-# Future -- need to scale based on values from the 
-fut.temp.scale<- function(fut.temp, base.temp.mean, base.temp.sd){
-  if(is.na(fut.temp)){
-    temp.scaled<- NA
-    return(temp.scaled)
-  } else {
-    temp.scaled<- (fut.temp - base.temp.mean)/base.temp.sd
-    return(temp.scaled)
-  }
-}
-
-base.temp.mean.sp<- mean(base.preds[base.preds$SEASON == "SPRING",]$Data[[1]]$Baseline, na.rm = T)
-base.temp.sd.sp<- sd(base.preds[base.preds$SEASON == "SPRING",]$Data[[1]]$Baseline, na.rm = T)
-spring.rescale.df<- data.frame(SEASON = "SPRING", mean = base.temp.mean.sp, sd = base.temp.sd.sp)
-base.temp.mean.f<- mean(base.preds[base.preds$SEASON == "FALL",]$Data[[1]]$Baseline, na.rm = T)
-base.temp.sd.f<- sd(base.preds[base.preds$SEASON == "FALL",]$Data[[1]]$Baseline, na.rm = T)
-fall.rescale.df<- data.frame(SEASON = "FALL", mean = base.temp.mean.f, sd = base.temp.sd.f)
-
+## Future
 fut.preds.sp<- spring.preds %>%
   dplyr::select(., x, y, Spring.2055, DEPTH, SHELF_POS) %>%
-  mutate(., "SHELF_POS.Scale" = as.numeric(scale(SHELF_POS)),
-         "DEPTH.Scale" = as.numeric(scale(abs(DEPTH))),
-         "SEASON" = rep("SPRING", nrow(.))) %>%
+  mutate(., "SEASON" = rep("SPRING", nrow(.))) %>%
   left_join(., spring.rescale.df, by = "SEASON")
-fut.preds.sp$SEASONALMU.OISST.Scale<- mapply(fut.temp.scale, fut.preds.sp$Spring.2055, fut.preds.sp$mean, fut.preds.sp$sd)
+fut.preds.sp$DEPTH.Scale<- mapply(temp.scale, abs(fut.preds.sp$DEPTH), spring.rescale.df$mean.depth, spring.rescale.df$sd.depth)
+fut.preds.sp$SHELF_POS.Scale<- mapply(temp.scale, fut.preds.sp$SHELF_POS, spring.rescale.df$mean.shelf, spring.rescale.df$sd.shelf)
+fut.preds.sp$SEASONALMU.OISST.Scale<- mapply(temp.scale, fut.preds.sp$Spring.2055, spring.rescale.df$mean.t, spring.rescale.df$sd.t)
+
 fut.preds.sp<- fut.preds.sp %>%
   group_by(., SEASON) %>%
   nest(.key = "Data")
 
 fut.preds.f<- fall.preds %>%
   dplyr::select(., x, y, Fall.2055, DEPTH, SHELF_POS) %>%
-  mutate(., "SHELF_POS.Scale" = as.numeric(scale(SHELF_POS)),
-         "DEPTH.Scale" = as.numeric(scale(abs(DEPTH))),
-         "SEASON" = rep("FALL", nrow(.))) %>%
+  mutate(., "SEASON" = rep("FALL", nrow(.))) %>%
   left_join(., fall.rescale.df, by = "SEASON")
-fut.preds.f$SEASONALMU.OISST.Scale<- mapply(fut.temp.scale, fut.preds.f$Fall.2055, fut.preds.f$mean, fut.preds.f$sd)
+fut.preds.f$DEPTH.Scale<- mapply(temp.scale, abs(fut.preds.f$DEPTH), fall.rescale.df$mean.depth, fall.rescale.df$sd.depth)
+fut.preds.f$SHELF_POS.Scale<- mapply(temp.scale, fut.preds.f$SHELF_POS, fall.rescale.df$mean.shelf, fall.rescale.df$sd.shelf)
+fut.preds.f$SEASONALMU.OISST.Scale<- mapply(temp.scale, fut.preds.f$Fall.2055, fall.rescale.df$mean.t, fall.rescale.df$sd.t)
 fut.preds.f<- fut.preds.f %>%
   group_by(., SEASON) %>%
   nest(.key = "Data")
@@ -316,7 +438,7 @@ pred.dat.f<- with(fut.preds$Data[[1]],
                              SHELF_POS.Scale = c(rep(mean(SHELF_POS.Scale, na.rm = T), 1000), seq(min(SHELF_POS.Scale, na.rm = T), max(SHELF_POS.Scale, na.rm = T), length = 500)), "SEASON" = rep("FALL", 1500)))
 rescaled.dat.f<- with(fut.preds$Data[[1]],
                       data.frame("SST" = seq(min(Fall.2055, na.rm = T), max(Fall.2055, na.rm = T), length = 500),
-                                 "Depth" = seq(min(DEPTH, na.rm = T), max(DEPTH, na.rm = T), length = 500),
+                                 "Depth" = seq(min(abs(DEPTH), na.rm = T), max(abs(DEPTH), na.rm = T), length = 500),
                                  "Shelf_Pos" = seq(min(SHELF_POS, na.rm = T), max(SHELF_POS, na.rm = T), length = 500),
                                  "Season" = rep("FALL", 500)))
 
@@ -326,7 +448,7 @@ pred.dat.s<- with(fut.preds$Data[[2]],
                              SHELF_POS.Scale = c(rep(mean(SHELF_POS.Scale, na.rm = T), 1000), seq(min(SHELF_POS.Scale, na.rm = T), max(SHELF_POS.Scale, na.rm = T), length = 500)), "SEASON" = rep("SPRING", 1500)))
 rescaled.dat.s<- with(fut.preds$Data[[2]],
                       data.frame("SST" = seq(min(Spring.2055, na.rm = T), max(Spring.2055, na.rm = T), length = 500),
-                                 "Depth" = seq(min(DEPTH, na.rm = T), max(DEPTH, na.rm = T), length = 500),
+                                 "Depth" = seq(min(abs(DEPTH), na.rm = T), max(abs(DEPTH), na.rm = T), length = 500),
                                  "Shelf_Pos" = seq(min(SHELF_POS, na.rm = T), max(SHELF_POS, na.rm = T), length = 500),
                                  "Season" = rep("SPRING", 500)))
 
@@ -334,80 +456,6 @@ pred.dat<- bind_rows(pred.dat.f, pred.dat.s)
 rescaled.dat<- bind_rows(rescaled.dat.f, rescaled.dat.s)
 
 #### A few examples
-# Data path
-dat.path<- "~/GitHub/COCA/Data/model.dat.rds"
-
-# Fish assessment species
-fish.spp<- read.csv("~/GitHub/COCA/Data/Assesmentfishspecies.csv")
-spp.example<- c("ATLANTIC COD", "SUMMER FLOUNDER", "LONGFIN SQUID", "AMERICAN LOBSTER")
-
-
-# Read it in, filter to one species, do some quick formatting to fit the GAM
-dat<- readRDS(dat.path) %>% 
-  filter(., SVSPP %in% fish.spp$SVSPP) %>%
-  left_join(., fish.spp, by = "SVSPP") %>%
-  mutate(., "YEAR" = factor(EST_YEAR, levels = seq(from = min(EST_YEAR), to = max(EST_YEAR), by = 1)),
-         "STRATUM.FACTOR" = factor(STRATUM, levels = unique(STRATUM)),
-         "SED.SIZE" = factor(SED.SIZE, levels = unique(SED.SIZE)),
-         "BIOMASS.WMEAN.ANOM" = as.numeric(BIOMASS.WMEAN.ANOM),
-         "BIOMASS.WMEAN.Scale" = as.numeric(scale(BIOMASS.WMEAN)),
-         "SHELF_POS.Scale" = as.numeric(scale(SHELF_POS)),
-         "DEPTH.Scale" = as.numeric(scale(abs(DEPTH))),
-         "SEASONALMU.OISST.Scale" = as.numeric(scale(SEASONALMU.OISST)),
-         "BOTTOMTEMP.Scale" = as.numeric(scale(BOTTEMP))) %>%
-  filter(., COMNAME %in% spp.example)
-dat$PRESENCE.ABUNDANCE<- ifelse(dat$ABUNDANCE > 0, 1, 0)
-dat$WT.ABUNDANCE<- ifelse(dat$PRESENCE.ABUNDANCE == 0, 1, dat$ABUNDANCE)
-
-# Look at the catch per tow distributions -- a lot of variability?
-dat.mean<- dat %>%
-  group_by(COMNAME, SEASON) %>%
-  summarize_at("ABUNDANCE", c(mean, sd), na.rm = T)
-names(dat.mean)<- c("COMNAME", "SEASON", "MEAN", "SD")
-dat.mean <- dat.mean %>%
-  mutate(., "ABUNDANCE.UP" = MEAN + 2*SD,
-         "ABUNDANCE.LOW" = max(c(MEAN - 2*SD), 0))
-
-dat.summ<- dat %>%
-  left_join(., dat.mean, by = c("COMNAME", "SEASON")) %>%
-  mutate(., "OUTSIDE" = ifelse(ABUNDANCE > ABUNDANCE.UP, 1, 0))
-
-dat.summ.out<- dat.summ %>%
-  group_by(COMNAME, SEASON) %>%
-  summarise(SUM.OUT = sum(OUTSIDE))
-
-dat.summ.pres<- dat.summ %>%
-  group_by(COMNAME, SEASON) %>%
-  summarize(SUM.PRES = sum(PRESENCE.ABUNDANCE))
-
-out<- dat.summ.out %>%
-  left_join(., dat.summ.pres, by = c("COMNAME", "SEASON")) %>%
-  mutate(., "Prop" = SUM.OUT/SUM.PRES)
-
-### Fitting models
-train.start<- "1982-01-01"
-train.end<- "2010-12-31"
-test.start<- "2011-01-01"
-test.end<- "2016-01-01"
-
-dat$TRAIN.TEST<- ifelse(as.Date(dat$DATE) >= train.start & as.Date(dat$DATE) <= train.end, "TRAIN", 
-                        ifelse(as.Date(dat$DATE) >= test.start & as.Date(dat$DATE) <= test.end, "TEST", "Neither")) 
-
-# Create nested dataframes, one for testing, one for training
-# Training
-dat.train<- dat %>%
-  group_by(., COMNAME, SEASON, TRAIN.TEST) %>%
-  dplyr::filter(., TRAIN.TEST == "TRAIN") %>%
-  nest(.key = "TRAIN.DATA") %>%
-  arrange(COMNAME)
-
-# Testing
-dat.test<- dat %>%
-  group_by(., COMNAME, SEASON, TRAIN.TEST) %>%
-  dplyr::filter(., TRAIN.TEST == "TEST") %>%
-  nest(.key = "TEST.DATA") %>%
-  arrange(COMNAME) 
-
 ## Loop over a few different scenarios...
 vote.fac<- 1
 dir.scenarios<- data.frame("Dir.Scenario" = c("Negative", "Neutral", "Positive"), "Negative" = c(10, 1, 0)*vote.fac, "Neutral" = c(2, 10, 2)*vote.fac, "Positive" = c(0, 1, 10)*vote.fac)
@@ -431,14 +479,16 @@ names(dir.scenarios)[1]<- "Scenario"
 names(vuln.scenarios)[1]<- "Scenario"
 
 # Set up the loop
-scenarios.type<- "Dir"
-scenarios.run<- dir.scenarios
+scenarios.type<- "Both"
+scenarios.run<- scenarios.c
 mod.sims<- 10000
 base.update.use<- TRUE
 dist.use<- "beta"
 dir.brks.use<- c(-1, 1)
 vuln.brks.use<- c(-3, -2, -1, 1, 2, 3)
-out.dir.stem<- "~/Desktop/NormalVoting_Beta_IncKnots_041218/"
+out.dir.stem<- "~/Desktop/NormalVoting_041818/"
+out.dir.stem<- "~/Desktop/Testing_042018/"
+
 fix.params<- NULL
 
 if(dir.exists(out.dir.stem)){
@@ -454,7 +504,7 @@ for(i in 1:nrow(dat.train)){
   # Get the data and fit the model
   dat.use<- dat.train[i,]
   season.use<- as.character(dat.use$SEASON[[1]])
-  gam.mod0<- gam(PRESENCE.ABUNDANCE ~ s(SHELF_POS.Scale, fx = FALSE, bs = 'cs') + s(DEPTH.Scale, fx = FALSE, bs = 'cs') + s(SEASONALMU.OISST.Scale, fx = FALSE, bs = 'cs'), drop.unused.levels = T, data = dat.use$TRAIN.DATA[[1]], family = binomial(link = logit), select = TRUE)
+  gam.mod0<- gam(PRESENCE.ABUNDANCE ~ s(DEPTH.Scale, fx = FALSE, bs = 'cs') + s(SEASONALMU.OISST.Scale, fx = FALSE, bs = 'cs'), drop.unused.levels = T, data = dat.use$TRAIN.DATA[[1]], family = binomial(link = logit), select = TRUE)
   coef.mod0<- coef(gam.mod0)
   vc.mod0<- vcov(gam.mod0)
   saveRDS(gam.mod0, file = paste(out.dir.stem, "gamfit", tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), ".rds", sep = ""))
@@ -473,7 +523,7 @@ for(i in 1:nrow(dat.train)){
       
       # Coef index
       coef.mod0.fix<- coef.mod0[names(coef.mod0) %in% fix.params.use]
-      coef.mod0.fix.mat<- matrix(coef.mod0.fix, nrow = 1, ncol = 27, byrow = T)
+      coef.mod0.fix.mat<- matrix(coef.mod0.fix, nrow = 1, ncol = length(coef.mod0.fix), byrow = T)
       
       # Move over values
       cand.params.all[,cand.params.all.ind]<- coef.mod0.fix.mat[rep(1:nrow(coef.mod0.fix.mat), times = nrow(cand.params.all)),]
@@ -482,14 +532,14 @@ for(i in 1:nrow(dat.train)){
       cand.params.all[,1]<- runif(mod.sims, -3, 3)
     } else {
       # Modify to match column names of cand.params
-      fix.params.use<- paste(paste("s(", fix.params, ")", sep = ""), ".", seq(from = 1, to = 4, by = 1), sep = "")
+      fix.params.use<- paste(paste("s(", fix.params, ")", sep = ""), ".", seq(from = 1, to = 9, by = 1), sep = "")
       
       # Cand.params.all index...
       cand.params.all.ind<- which(colnames(cand.params.all) %in% fix.params.use, arr.ind = T)
       
       # Coef index
       coef.mod0.fix<- coef.mod0[names(coef.mod0) %in% fix.params.use]
-      coef.mod0.fix.mat<- matrix(coef.mod0.fix, nrow = 1, ncol = 4, byrow = T)
+      coef.mod0.fix.mat<- matrix(coef.mod0.fix, nrow = 1, ncol = length(coef.mod0.fix), byrow = T)
       
       # Move over values
       cand.params.all[,cand.params.all.ind]<- coef.mod0.fix.mat[rep(1:nrow(coef.mod0.fix.mat), times = nrow(cand.params.all)),]
@@ -612,6 +662,7 @@ for(i in 1:nrow(dat.train)){
     sst.out<- sst.base +
       geom_line(data = sst.dat, aes(x = Value, y = Pred, group = Model, color = Model)) +
       scale_color_manual(name = "Model", values = c('#e41a1c','#377eb8'), labels = c("SDM", "SDM + NEVA")) +
+      xlab("SST") +
       theme_bw() 
     
     # Depth
@@ -632,30 +683,32 @@ for(i in 1:nrow(dat.train)){
     depth.out<- depth.base +
       geom_line(data = depth.dat, aes(x = Value, y = Pred, group = Model, color = Model)) +
       scale_color_manual(name = "Model", values = c('#e41a1c','#377eb8'), labels = c("SDM", "SDM + NEVA")) +
+      xlab("Depth") +
       theme_bw() 
     
     # Along 
-    want<- 1001:1500
-    shelf.all<- data.frame(pred.all[want,])
-    colnames(shelf.all)<- paste("Mod.", seq(from = 1, to = ncol(shelf.all)), sep = "")
-    shelf.all<- shelf.all %>%
-      gather(., "Model", "Pred")
-    shelf.all$Value<- rep(rescaled.dat.use$Shelf_Pos, length(unique(shelf.all$Model)))
-    shelf.all$Parameter<- rep("Shelf_Pos", nrow(depth.all))
-    
-    shelf.base<- ggplot(shelf.all, aes(x = Value, y = Pred, group = Model)) + 
-      geom_line(show.legend = F, color = "#bdbdbd") +
-      ylim(c(0,1)) 
-    
-    shelf.dat<- data.frame("Parameter" = rep("Shelf_Pos", 1000), "Value" = rep(rescaled.dat.use$Shelf_Pos, 2), "Pred" = c(pred0[want], pred.best[want]), "Model" = c(rep("SDM", 500), rep("SDM + NEVA", 500)))
-    
-    shelf.out<- shelf.base +
-      geom_line(data = shelf.dat, aes(x = Value, y = Pred, group = Model, color = Model)) +
-      scale_color_manual(name = "Model", values = c('#e41a1c','#377eb8'), labels = c("SDM", "SDM + NEVA")) +
-      theme_bw()
-    
+    # want<- 1001:1500
+    # shelf.all<- data.frame(pred.all[want,])
+    # colnames(shelf.all)<- paste("Mod.", seq(from = 1, to = ncol(shelf.all)), sep = "")
+    # shelf.all<- shelf.all %>%
+    #   gather(., "Model", "Pred")
+    # shelf.all$Value<- rep(rescaled.dat.use$Shelf_Pos, length(unique(shelf.all$Model)))
+    # shelf.all$Parameter<- rep("Shelf_Pos", nrow(depth.all))
+    # 
+    # shelf.base<- ggplot(shelf.all, aes(x = Value, y = Pred, group = Model)) + 
+    #   geom_line(show.legend = F, color = "#bdbdbd") +
+    #   ylim(c(0,1)) 
+    # 
+    # shelf.dat<- data.frame("Parameter" = rep("Shelf_Pos", 1000), "Value" = rep(rescaled.dat.use$Shelf_Pos, 2), "Pred" = c(pred0[want], pred.best[want]), "Model" = c(rep("SDM", 500), rep("SDM + NEVA", 500)))
+    # 
+    # shelf.out<- shelf.base +
+    #   geom_line(data = shelf.dat, aes(x = Value, y = Pred, group = Model, color = Model)) +
+    #   scale_color_manual(name = "Model", values = c('#e41a1c','#377eb8'), labels = c("SDM", "SDM + NEVA")) +
+    #   theme_bw()
+    # 
     # Arrange and save
-    out<- plot_grid(sst.out + theme(legend.position="none"), depth.out + theme(legend.position="none"), shelf.out + theme(legend.position="none"), nrow = 1, ncol = 3, align = "hv", scale = 1)
+    # out<- plot_grid(sst.out + theme(legend.position="none"), depth.out + theme(legend.position="none"), shelf.out + theme(legend.position="none"), nrow = 1, ncol = 3, align = "hv", scale = 1)
+    out<- plot_grid(sst.out + theme(legend.position="none"), depth.out + theme(legend.position="none"), nrow = 1, ncol = 2, align = "hv", scale = 1)
     legend<- get_legend(sst.out)
     out<- plot_grid(out, legend, rel_widths = c(3, .3))
     ggsave(paste(out.dir.stem, tolower(dat.use$COMNAME), "_", tolower(dat.use$SEASON), "_", as.character(scenario.use$Scenario), "_PredCurv.jpg", sep = ""), out, width = 11, height = 8, dpi = 125, units = "in")
