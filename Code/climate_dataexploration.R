@@ -33,14 +33,11 @@ us.states.f<- fortify(us.states, NAME_1)
 ca.provinces.f<- fortify(ca.provinces, NAME_1)
 
 #########
-#### Applying anomalies
+#### Applying anomalies -- mean
 #########
 ## Inspect the file using the ncdf4 libaray
-# Open a NetCDF file
-all.dat <- nc_open("./Data/SST.CMIP5.1982-2099.anom.nc")
-
 ## Get sst anomaly 
-sst.anom.temp <- raster::stack("./Data/SST.CMIP5.1982-2099.anom.nc", varname = "sstanom")
+sst.anom.temp<- raster::stack("~/GitHub/COCA/Data/SST.CMIP5.1982-2099.anom.nc", varname = "sstanom")
 sst.anom<- raster::rotate(sst.anom.temp)
 
 ## Get oisst data
@@ -154,3 +151,77 @@ ggplot() +
   coord_fixed(1.3) + 
   theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black")) +
   facet_wrap(~Season)
+
+
+#####
+## Min and Max
+#####
+## Get sst anomaly 
+sst.anom.temp<- raster::stack("~/GitHub/COCA/Data/SST.CMIP5.1982-2099.anom.nc", varname = "sstpct05")
+sst.anom<- raster::rotate(sst.anom.temp)
+
+# Okay, now good to apply the anomalies from the climate models to climatology and get raw values
+sst.model<- stack()
+
+for(i in 1:nlayers(sst.anom)) {
+  index.match<- which(gsub("X", "", names(oisst.clim.coarse)) == unlist(strsplit(names(sst.anom)[i], "[.]"))[2])
+  rast.temp<- oisst.clim.coarse[[index.match]] + sst.anom[[i]]
+  sst.model<- stack(sst.model, rast.temp)
+  names(sst.model)[i]<- names(sst.anom)[i]
+}
+
+# One more step, need to fill in the missing coastline raster cell values.... Function below, i is corresponding to a three by three window
+fill.na <- function(x, i=5) {
+  if( is.na(x)[i] ) {
+    return( round(mean(x, na.rm=TRUE),0) )
+  } else {
+    return( round(x[i],0) )
+  }
+}  
+
+# Now apply that function to each raster stack
+for(i in 1:nlayers(sst.model)) {
+  new.rast<- focal(sst.model[[i]], w = matrix(1, 3, 3), fun = fill.na, pad = TRUE, na.rm = FALSE)
+  sst.model[[i]]<- new.rast
+}
+
+sst.model.proj<- projectRaster(sst.model, crs = proj.utm)
+names(sst.model.proj)<- names(sst.anom)
+sst.model<- projectRaster(sst.model.proj, crs = proj.wgs84)
+writeRaster(sst.model.proj, filename = paste("~/GitHub/COCA/Data/", "climate.sst.proj.pct05.grd", sep = ""), format = "raster", overwrite = TRUE)
+
+## Get sst anomaly 
+sst.anom.temp<- raster::stack("~/GitHub/COCA/Data/SST.CMIP5.1982-2099.anom.nc", varname = "sstpct95")
+sst.anom<- raster::rotate(sst.anom.temp)
+
+# Okay, now good to apply the anomalies from the climate models to climatology and get raw values
+sst.model<- stack()
+
+for(i in 1:nlayers(sst.anom)) {
+  index.match<- which(gsub("X", "", names(oisst.clim.coarse)) == unlist(strsplit(names(sst.anom)[i], "[.]"))[2])
+  rast.temp<- oisst.clim.coarse[[index.match]] + sst.anom[[i]]
+  sst.model<- stack(sst.model, rast.temp)
+  names(sst.model)[i]<- names(sst.anom)[i]
+}
+
+# One more step, need to fill in the missing coastline raster cell values.... Function below, i is corresponding to a three by three window
+fill.na <- function(x, i=5) {
+  if( is.na(x)[i] ) {
+    return( round(mean(x, na.rm=TRUE),0) )
+  } else {
+    return( round(x[i],0) )
+  }
+}  
+
+# Now apply that function to each raster stack
+for(i in 1:nlayers(sst.model)) {
+  new.rast<- focal(sst.model[[i]], w = matrix(1, 3, 3), fun = fill.na, pad = TRUE, na.rm = FALSE)
+  sst.model[[i]]<- new.rast
+}
+
+sst.model.proj<- projectRaster(sst.model, crs = proj.utm)
+names(sst.model.proj)<- names(sst.anom)
+sst.model<- projectRaster(sst.model.proj, crs = proj.wgs84)
+writeRaster(sst.model.proj, filename = paste("~/GitHub/COCA/Data/", "climate.sst.proj.pct95.grd", sep = ""), format = "raster", overwrite = TRUE)
+
+

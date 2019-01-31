@@ -29,7 +29,7 @@ dat.path<- "~/GitHub/COCA/Data/model.dat.rds"
 
 # Fish assessment species
 fish.spp<- read.csv("~/GitHub/COCA/Data/Assesmentfishspecies.csv")
-spp.example<- c("LONGFIN SQUID")
+spp.example<- c("LONGFIN SQUID", "AMERICAN LOBSTER")
 
 # Read it in, filter to one species, do some quick formatting to fit the GAM
 dat<- readRDS(dat.path) %>% 

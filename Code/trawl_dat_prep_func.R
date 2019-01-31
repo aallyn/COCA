@@ -136,7 +136,7 @@ trawl_dat_prep<- function(survdat.file = "Survdat_Nye2016.RData", sst.nc = "EC_s
   
   # One more modification to get PRESENCE and BIOMASS.MOD data ready
   trawl.dat.full$PRESENCE<- ifelse(trawl.dat.full$BIOMASS > 0, 1, trawl.dat.full$BIOMASS) # Create presence/absence vector based on biomass
-  trawl.dat.full$BIOMASS.MOD<- log10(trawl.dat.full$BIOMASS+1)
+  trawl.dat.full$BIOMASS.MOD<- log(trawl.dat.full$BIOMASS+1)
   
   trawl.dat.full$DATE<- as.Date(paste(trawl.dat.full$EST_YEAR, trawl.dat.full$EST_MONTH, trawl.dat.full$EST_DAY, sep = "-"))
   trawl.dat.full.reduced<- trawl.dat.full[trawl.dat.full$DATE >= "1982-01-01",] # Keep only data with spring and fall seasonal mean
