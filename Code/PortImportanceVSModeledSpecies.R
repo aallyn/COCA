@@ -4,7 +4,7 @@
 library(tidyverse)
 
 # Load in model projections and fit
-out.dir<- "~/Desktop/NormalVoting_BiomassIncPresNoExposure_09222018/"
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_09222018/"
 dat.full<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) 
 
 # Model fit stats and filter out models that had less than 0.7 or have low certainty according to expert assessment
@@ -25,7 +25,11 @@ dat.mod.results<- dat.sub %>%
   mutate(., "Match.Col" = gsub(" ", ".", COMNAME))
 
 # Add model results to landings dataset
-landings.dat<- read.csv("~/GitHub/COCA/Data/landport1115.csv") %>%
+landings.dat<- read.csv("~/GitHub/COCA/Data/port_dealer_spp.csv")
+
+
+
+%>%
   gather(., "Match.Col", "Landings", -Port.short, -Port.state, -Port.long)
 landings.dat$Port.short<- gsub("[.]", "_", landings.dat$Port.short)
 landings.dat$Port.long<- paste(landings.dat$Port.short, landings.dat$Port.state, sep = ".")
