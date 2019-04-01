@@ -1,8 +1,10 @@
-###### Merging SDM and NEVA: 07-06-2018
+################ 
+## COCA Methods Manuscript
 ################
+# Preliminaries -----------------------------------------------------------
 ## Key components: No longer sampling using MCMC update -- exhaustive evaulation of all potential GAM models. Adding in an option to allow for either using a fixed baseline OR using a new baseline and future for each of the potential GAM models
 
-## Preliminaries
+# Libraries
 library(mgcv)  
 library(tidyverse)
 library(mvtnorm)
@@ -23,10 +25,11 @@ library(raster)
 library(tools)
 library(randomForest)
 library(broom)
+library(snakecase)
+library(openair)
+library(randomcoloR)
 
-#####
-## Data prep -- always run
-#####
+# Data prep - Alaways run -------------------------------------------------
 ## Core functions
 # NegativeLL function -- the likelihood of NEVA votes given the base and future, which comes out of a potential gam model. In this formulaion, we propose that the NEVA acts on the biomass model component. Not the presence component. 
 loglike_bio_func<- function(gam.mod0.p, gam.mod0.b, season, cand.params.b, base.preds, fut.preds, nevaD, nevaS, nevaE, dir.brks, fix.params = NULL){
@@ -211,6 +214,35 @@ dat<- readRDS(dat.path) %>%
   filter(., SVSPP %in% fish.spp$SVSPP) %>%
   left_join(., fish.spp, by = "SVSPP") 
 
+# Additional processing/filtering -- remove Atlantic sturgeon as an endangered species
+dat<- dat[dat$COMNAME != "ATLANTIC STURGEON", ]
+
+# Observation summaries
+dat.surv.yrs<- dat %>%
+  filter(., PRESENCE > 0) %>%
+  group_by(COMNAME, SEASON) %>%
+  dplyr::summarize(., 
+                   "Survey Years" = n_distinct(EST_YEAR))
+
+spp.remove<- dat.surv.yrs[dat.surv.yrs$'Survey Years' < 23,]
+
+dat.obs.peryear<- dat %>%
+  filter(., PRESENCE > 0) %>%
+  group_by(COMNAME, EST_YEAR, SEASON) %>%
+  dplyr::summarize(., 
+                   "Occurrence" = n_distinct(STATION)) %>%
+  mutate(., "Occurrence Rate" = Occurrence/max(Occurrence)) %>%
+  arrange(., desc(`Occurrence Rate`))
+
+dat.obs.agg<- dat.obs.peryear %>%
+  group_by(COMNAME, SEASON) %>%
+  mutate(., "Avg Occurrence Rate" = mean(`Occurrence Rate`, na.rm = T)) %>%
+  arrange(., desc(`Avg Occurrence Rate`))
+
+dat.obs.peryear<- dat.obs.peryear %>%
+  arrange(., desc(`Occurrence Rate`))
+
+
 # Training vs. testing
 train.start<- "1982-01-01"
 train.end<- "2010-12-31"
@@ -310,10 +342,10 @@ dat.test<- dat.test.f %>%
 
 ## We will also need correctly "rescaled" versions for the projection time periods
 # Need base.preds, fut.preds, nevaD and nevaV
-spring.preds = "~/Dropbox/Andrew/Work/GMRI/AllData/spring.rast.preds06122018.rds"
+spring.preds = "~/GitHub/COCA/Data/spring.rast.preds06122018.rds"
 spring.preds<- readRDS(spring.preds)
 
-fall.preds = "~/Dropbox/Andrew/Work/GMRI/AllData/fall.rast.preds06122018.rds"
+fall.preds = "~/GitHub/COCA/Data/fall.rast.preds06122018.rds"
 fall.preds<- readRDS(fall.preds)
 
 base.preds.sp<- spring.preds %>%
@@ -400,9 +432,6 @@ rescaled.dat.s<- with(fut.preds$Data[[2]],
 pred.dat<- bind_rows(pred.dat.f, pred.dat.s)
 rescaled.dat<- bind_rows(rescaled.dat.f, rescaled.dat.s)
 
-#####
-## Model fit
-#####
 # Bring in vulnerability assessment datasets
 dir.dat<- read.csv("~/GitHub/COCA/Data/JHareDirectionalEffect.csv") %>%
   mutate(., "COMNAME" = toupper(Species)) %>%
@@ -434,11 +463,16 @@ qual.dat<- dir.dat %>%
 dat.full<- dat.train %>%
   left_join(., qual.dat, by = "COMNAME")
 
+# Now to test data
+dat.full<- dat.full %>%
+  left_join(., dat.test, by = c("COMNAME", "SEASON"))
+
+# Model fitting -----------------------------------------------------------
 # Set up the loop
 scenarios.type = "Dir.Sens"
 mod.sims<- 1000
 dir.brks<- c(0.33, 0.67)
-out.dir<- "~/Desktop/NormalVoting_BiomassIncPresNoExposure_09222018/"
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
 fix.params<- NULL
 set.seed(13)
 
@@ -644,8 +678,9 @@ rmse_func<- function(test.data, predicted, response) {
     if(all(test.data$PRESENCE.BIOMASS == 0)){
       return(NA)
     } else {
-      dat<- prediction(predictions = predicted, labels = test.data[,col.ind])
-      return(performance(dat, measure = "rmse")@y.values[[1]])
+      rmse.out<- rmse(sim = as.numeric(predicted), obs = test.data$PRESENCE.BIOMASS)
+      rmse.out<- rmse.out/sd(test.data[,col.ind], na.rm = TRUE)
+      return(rmse.out)
     }
   }
   
@@ -656,7 +691,9 @@ rmse_func<- function(test.data, predicted, response) {
     if(all(test.data$BIOMASS == 0)){
       return(NA)
     } else {
-      return(nrmse(sim = as.numeric(predicted), obs = test.data$BIOMASS))
+      rmse.out<- rmse(sim = as.numeric(predicted), obs = test.data$BIOMASS)
+      rmse.out<- rmse.out/sd(test.data[,col.ind], na.rm = TRUE)
+      return(rmse.out)
     }
   }
 }
@@ -693,8 +730,68 @@ calib_plot_func<- function(test.data, predicted){
   }
 }
 
-dat.full<- dat.full %>%
-  left_join(., dat.test, by = c("COMNAME", "SEASON"))
+corr_coeff_func<- function(test.data, predicted, response){
+  if(response == "Presence"){
+    test.data<- dplyr::select(test.data, one_of(c("DEPTH.Scale", "SEASONALMU.OISST.Scale", "PRESENCE.BIOMASS"))) 
+    test.data<- data.frame(na.omit(test.data))
+    col.ind<- which(colnames(test.data) == "PRESENCE.BIOMASS")
+    if(all(test.data$PRESENCE.BIOMASS == 0)){
+      return(NA)
+    } else {
+      mean.obs<- mean(test.data[,col.ind])
+      mean.mod<- mean(predicted, na.rm = TRUE)
+      sd.obs<- sd(test.data[,col.ind])
+      sd.mod<- sd(predicted, na.rm = TRUE)
+      samps<- nrow(test.data)
+      corr.coeff<- ((1/samps)*(sum((predicted - mean.mod)*(test.data[,col.ind] - mean.obs))))/(sd.obs*sd.mod)
+      return(corr.coeff)
+    }
+  }
+  
+  
+  if(response == "Biomass"){
+    test.data<- dplyr::select(test.data, one_of(c("DEPTH.Scale", "SEASONALMU.OISST.Scale", "BIOMASS"))) 
+    test.data<- data.frame(na.omit(test.data))
+    col.ind<- which(colnames(test.data) == "BIOMASS")
+    if(all(test.data$BIOMASS == 0)){
+      return(NA)
+    } else {
+      mean.obs<- mean(test.data[,col.ind])
+      mean.mod<- mean(predicted, na.rm = TRUE)
+      sd.obs<- sd(test.data[,col.ind])
+      sd.mod<- sd(predicted, na.rm = TRUE)
+      samps<- nrow(test.data)
+      corr.coeff<- ((1/samps)*(sum((predicted - mean.mod)*(test.data[,col.ind] - mean.obs))))/(sd.obs*sd.mod)
+      return(corr.coeff)
+    }
+  }
+}
+
+sdm_bias_func<- function(test.data, predicted, response){
+  if(response == "Presence"){
+    test.data<- dplyr::select(test.data, one_of(c("DEPTH.Scale", "SEASONALMU.OISST.Scale", "PRESENCE.BIOMASS"))) 
+    test.data<- data.frame(na.omit(test.data))
+    col.ind<- which(colnames(test.data) == "PRESENCE.BIOMASS")
+    if(all(test.data$PRESENCE.BIOMASS == 0)){
+      return(NA)
+    } else {
+      bias<- sd(predicted, na.rm = TRUE)/sd(test.data[,col.ind], na.rm = TRUE)
+      return(bias)
+    }
+  }
+  
+  if(response == "Biomass"){
+    test.data<- dplyr::select(test.data, one_of(c("DEPTH.Scale", "SEASONALMU.OISST.Scale", "BIOMASS"))) 
+    test.data<- data.frame(na.omit(test.data))
+    col.ind<- which(colnames(test.data) == "BIOMASS")
+    if(all(test.data$BIOMASS == 0)){
+      return(NA)
+    } else {
+      bias<- sd(predicted)/sd(test.data[,col.ind])
+      return(bias)
+    }
+  }
+}
 
 mod.results<- data.frame(dat.full[,c(1:2)])
 mod.results$DevExp.P<- rep(NA, nrow(mod.results))
@@ -704,11 +801,17 @@ mod.results$Temp.DevExp.B<- rep(NA, nrow(mod.results))
 mod.results$AUC.SDM<- rep(NA, nrow(mod.results))
 mod.results$RMSE.SDM.P<- rep(NA, nrow(mod.results))
 mod.results$RMSE.SDM.B<- rep(NA, nrow(mod.results))
+mod.results$CorrCoeff.SDM.P<- rep(NA, nrow(mod.results))
+mod.results$CorrCoeff.SDM.B<- rep(NA, nrow(mod.results))
+mod.results$Bias.SDM.P<- rep(NA, nrow(mod.results))
+mod.results$Bias.SDM.B<- rep(NA, nrow(mod.results))
 mod.results$Calib.SDM<- rep(NA, nrow(mod.results))
 mod.results$Pred.Min.SDM<- rep(NA, nrow(mod.results))
 mod.results$Pred.Max.SDM<- rep(NA, nrow(mod.results))
 mod.results$Pred.BaseRate.SDM<- rep(NA, nrow(mod.results))
 mod.results$RMSE.NEVA.B<- rep(NA, nrow(mod.results))
+mod.results$CorrCoeff.NEVA.B<- rep(NA, nrow(mod.results))
+mod.results$Bias.NEVA.B<- rep(NA, nrow(mod.results))
 
 for(i in 1:nrow(dat.train)){
   
@@ -759,7 +862,11 @@ for(i in 1:nrow(dat.train)){
            "RMSE.SDM.P" = pmap(list(test.data = TEST.DATA, predicted = Predicted.SDM.P, response = "Presence"), possibly(rmse_func, NA)),
            "RMSE.SDM.B" = pmap(list(test.data = TEST.DATA, predicted = Predicted.SDM.B, response = "Biomass"), possibly(rmse_func, NA)),
            "Calib.Stat.SDM" = pmap(list(test.data = TEST.DATA, predicted = Predicted.SDM.P), possibly(calib_stat_func, NA)),
-           "Calib.Plot.SDM" = pmap(list(test.data = TEST.DATA, predicted = Predicted.SDM.P), possibly(calib_plot_func, NA)))
+           "Calib.Plot.SDM" = pmap(list(test.data = TEST.DATA, predicted = Predicted.SDM.P), possibly(calib_plot_func, NA)),
+           "CorrCoeff.SDM.P" = pmap(list(test.data = TEST.DATA, predicted = Predicted.SDM.P, response = "Presence"), possibly(corr_coeff_func, NA)),
+           "CorrCoeff.SDM.B" = pmap(list(test.data = TEST.DATA, predicted = Predicted.SDM.B, response = "Biomass"), possibly(corr_coeff_func, NA)), 
+           "Bias.SDM.P" = pmap(list(test.data = TEST.DATA, predicted = Predicted.SDM.P, response = "Presence"), possibly(sdm_bias_func, NA)),
+           "Bias.SDM.B" = pmap(list(test.data = TEST.DATA, predicted = Predicted.SDM.B, response = "Biomass"), possibly(sdm_bias_func, NA)))
   
   mod.results$AUC.SDM[i]<- round(as.numeric(dat.use$AUC.SDM[[1]]), 3)
   mod.results$RMSE.SDM.P[i]<- round(as.numeric(dat.use$RMSE.SDM.P[[1]]), 3)
@@ -768,7 +875,11 @@ for(i in 1:nrow(dat.train)){
   mod.results$Pred.Min.SDM[i]<- round(as.numeric(dat.use$Pred.Ranges.SDM[[1]]$Min.Pred), 3)
   mod.results$Pred.Max.SDM[i]<- round(as.numeric(dat.use$Pred.Ranges.SDM[[1]]$Max.Pred), 3)
   mod.results$Pred.BaseRate.SDM[i]<- round(as.numeric(dat.use$Pred.Ranges.SDM[[1]]$Mean.Pred), 3)
-  
+  mod.results$CorrCoeff.SDM.P[i]<- round(as.numeric(dat.use$CorrCoeff.SDM.P[[1]]), 3)
+  mod.results$CorrCoeff.SDM.B[i]<- round(as.numeric(dat.use$CorrCoeff.SDM.B[[1]]), 3)
+  mod.results$Bias.SDM.P[i]<- round(as.numeric(dat.use$Bias.SDM.P[[1]]), 3)
+  mod.results$Bias.SDM.B[i]<- round(as.numeric(dat.use$Bias.SDM.B[[1]]), 3)
+
   # A few plots --
   # Spatial residual maps
   resids.plot<- dat.use$Residuals.SDM.P[[1]]
@@ -902,10 +1013,14 @@ for(i in 1:nrow(dat.train)){
   dat.use<- dat.use %>%
     mutate(., "Predicted.NEVA.B" = pmap(list(mod.fitted.p = mod.fitted.p, mod.fitted.b = mod.fitted.b, test.data = TEST.DATA, neva.best.fit.b = list(best.fit.mat.b)), possibly(neva_predict_bio_func, NA)),
            "Residuals.NEVA.B" = pmap(list(test.data = TEST.DATA, predicted = Predicted.NEVA.B, response = "Biomass", type = "response"), possibly(resids_map_func, NA)),
-           "RMSE.NEVA.B" = pmap(list(test.data = TEST.DATA, predicted = Predicted.NEVA.B, response = "Biomass"), possibly(rmse_func, NA)))
+           "RMSE.NEVA.B" = pmap(list(test.data = TEST.DATA, predicted = Predicted.NEVA.B, response = "Biomass"), possibly(rmse_func, NA)),
+           "CorrCoeff.NEVA.B" = pmap(list(test.data = TEST.DATA, predicted = Predicted.NEVA.B, response = "Biomass"), possibly(corr_coeff_func, NA)), 
+           "Bias.NEVA.B" = pmap(list(test.data = TEST.DATA, predicted = Predicted.NEVA.B, response = "Biomass"), possibly(sdm_bias_func, NA)))
   
   # Store key results
   mod.results$RMSE.NEVA.B[i]<- round(as.numeric(dat.use$RMSE.NEVA.B[[1]]), 3)
+  mod.results$CorrCoeff.NEVA.B[i]<- round(as.numeric(dat.use$CorrCoeff.NEVA.B[[1]]), 3)
+  mod.results$Bias.NEVA.B[i]<- round(as.numeric(dat.use$Bias.NEVA.B[[1]]), 3)
   
   # A few plots --
   # Spatial residual maps
@@ -998,20 +1113,16 @@ for(i in 1:nrow(dat.train)){
 
 write.csv(mod.results, file = paste(out.dir, "mod.results.csv", sep = ""))
 
-#####
-## SDM predictions
-#####
-out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_09222018/" 
-res.files<- list.files(out.dir, "mcmc_")
 
+# Model predictions -------------------------------------------------------
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/" 
+res.files<- list.files(out.dir, "mcmc_")
 mod.results<- read.csv(paste(out.dir, "mod.results.csv", sep = ""))
 
 for(i in seq_along(res.files)){
   spp<- toupper(strsplit(gsub(".rds", "", gsub("mcmc_", "", res.files[i])), "_")[[1]][1])
   season<- toupper(strsplit(gsub(".rds", "", gsub("mcmc_", "", res.files[i])), "_")[[1]][2])
   spp.season.match<- paste(spp, season, sep = ".")
-  
-  temp.dev.exp<- mod.results$Temp.DevExp.B[paste(mod.results$COMNAME, mod.results$SEASON, sep = ".") == spp.season.match]
   
   # Model fit -- presence and biomass SDM
   mod.fitted.p<- readRDS(paste(out.dir, gsub("mcmc_", "gamfitpres", res.files[i]), sep = ""))
@@ -1078,6 +1189,12 @@ for(i in seq_along(res.files)){
   sdm.diff.p<- data.frame("x" = sdm.map.fut.mu.p$x, "y" = sdm.map.fut.mu.p$y, "pred" = sdm.map.fut.mu.p$pred - sdm.map.base.p$pred)
   sdm.lwr.diff.p<- data.frame("x" = sdm.map.fut.pct05.p$x, "y" = sdm.map.fut.pct05.p$y, "pred" = sdm.map.fut.pct05.p$pred - sdm.map.base.p$pred)
   sdm.upr.diff.p<- data.frame("x" = sdm.map.fut.pct95.p$x, "y" = sdm.map.fut.pct95.p$y, "pred" = sdm.map.fut.pct95.p$pred - sdm.map.base.p$pred)
+  
+  # Percent Differences
+  sdm.percdiff.p<- data.frame("x" = sdm.map.fut.mu.p$x, "y" = sdm.map.fut.mu.p$y, "pred" = ((sdm.map.fut.mu.p$pred - sdm.map.base.p$pred)/sdm.map.base.p$pred))
+  sdm.lwr.percdiff.p<- data.frame("x" = sdm.map.fut.pct05.p$x, "y" = sdm.map.fut.pct05.p$y, "pred" = ((sdm.map.fut.pct05.p$pred - sdm.map.base.p$pred)/sdm.map.base.p$pred))
+  sdm.upr.percdiff.p<- data.frame("x" = sdm.map.fut.pct95.p$x, "y" = sdm.map.fut.pct95.p$y, "pred" = ((sdm.map.fut.pct95.p$pred - sdm.map.base.p$pred)/sdm.map.base.p$pred))
+  
   names(sdm.map.base.p)[3]<- "Baseline.sdm.p"
   names(sdm.map.fut.mu.p)[3]<- "Future_mean.sdm.p"
   names(sdm.map.fut.pct05.p)[3]<- "Future_cold.sdm.p"
@@ -1085,11 +1202,19 @@ for(i in seq_along(res.files)){
   names(sdm.diff.p)[3]<- "Future_mean_diff.sdm.p"
   names(sdm.lwr.diff.p)[3]<- "Future_cold_diff.sdm.p"
   names(sdm.upr.diff.p)[3]<- "Future_warm_diff.sdm.p"
+  names(sdm.percdiff.p)[3]<- "Future_mean_percdiff.sdm.p"
+  names(sdm.lwr.percdiff.p)[3]<- "Future_cold_percdiff.sdm.p"
+  names(sdm.upr.percdiff.p)[3]<- "Future_warm_percdiff.sdm.p"
   
   # Biomass
   sdm.diff.b<- data.frame("x" = sdm.map.fut.mu.b$x, "y" = sdm.map.fut.mu.b$y, "pred" = sdm.map.fut.mu.b$pred - sdm.map.base.b$pred)
   sdm.lwr.diff.b<- data.frame("x" = sdm.map.fut.pct05.b$x, "y" = sdm.map.fut.pct05.b$y, "pred" = sdm.map.fut.pct05.b$pred - sdm.map.base.b$pred)
   sdm.upr.diff.b<- data.frame("x" = sdm.map.fut.pct95.b$x, "y" = sdm.map.fut.pct95.b$y, "pred" = sdm.map.fut.pct95.b$pred - sdm.map.base.b$pred)
+  
+  sdm.percdiff.b<- data.frame("x" = sdm.map.fut.mu.b$x, "y" = sdm.map.fut.mu.b$y, "pred" = ((sdm.map.fut.mu.b$pred - sdm.map.base.b$pred)/sdm.map.base.b$pred))
+  sdm.lwr.percdiff.b<- data.frame("x" = sdm.map.fut.pct05.b$x, "y" = sdm.map.fut.pct05.b$y, "pred" = ((sdm.map.fut.pct05.b$pred - sdm.map.base.b$pred)/sdm.map.base.b$pred))
+  sdm.upr.percdiff.b<- data.frame("x" = sdm.map.fut.pct95.b$x, "y" = sdm.map.fut.pct95.b$y, "pred" = ((sdm.map.fut.pct95.b$pred - sdm.map.base.b$pred)/sdm.map.base.b$pred))
+  
   names(sdm.map.base.b)[3]<- "Baseline.sdm.b"
   names(sdm.map.fut.mu.b)[3]<- "Future_mean.sdm.b"
   names(sdm.map.fut.pct05.b)[3]<- "Future_cold.sdm.b"
@@ -1097,6 +1222,9 @@ for(i in seq_along(res.files)){
   names(sdm.diff.b)[3]<- "Future_mean_diff.sdm.b"
   names(sdm.lwr.diff.b)[3]<- "Future_cold_diff.sdm.b"
   names(sdm.upr.diff.b)[3]<- "Future_warm_diff.sdm.b"
+  names(sdm.percdiff.b)[3]<- "Future_mean_percdiff.sdm.b"
+  names(sdm.lwr.percdiff.b)[3]<- "Future_cold_percdiff.sdm.b"
+  names(sdm.upr.percdiff.b)[3]<- "Future_warm_percdiff.sdm.b"
   
   # Getting combined biomass predictions
   # Make predictions with these values
@@ -1134,6 +1262,10 @@ for(i in seq_along(res.files)){
   combo.lwr.diff<- data.frame("x" = combo.map.fut.pct05$x, "y" = combo.map.fut.pct05$y, "pred" = combo.map.fut.pct05$pred - combo.map.base$pred)
   combo.upr.diff<- data.frame("x" = combo.map.fut.pct95$x, "y" = combo.map.fut.pct95$y, "pred" = combo.map.fut.pct95$pred - combo.map.base$pred)
   
+  combo.percdiff<- data.frame("x" = combo.map.fut.mu$x, "y" = combo.map.fut.mu$y, "pred" = ((combo.map.fut.mu$pred - combo.map.base$pred)/combo.map.base$pred))
+  combo.lwr.percdiff<- data.frame("x" = combo.map.fut.pct05$x, "y" = combo.map.fut.pct05$y, "pred" = ((combo.map.fut.pct05$pred - combo.map.base$pred)/combo.map.base$pred))
+  combo.upr.percdiff<- data.frame("x" = combo.map.fut.pct95$x, "y" = combo.map.fut.pct95$y, "pred" = ((combo.map.fut.pct95$pred - combo.map.base$pred)/combo.map.base$pred))
+  
   # Calculate fish availability for the different datasets: combo.map.base, combo.map.fut.mu, combo.map.fut.pct05, combo.map.fut.pct95, combo.diff, combo.lwr.diff, combo.upr.diff
   names(combo.map.base)[3]<- "Baseline.combo.b"
   names(combo.map.fut.mu)[3]<- "Future_mean.combo.b"
@@ -1142,6 +1274,9 @@ for(i in seq_along(res.files)){
   names(combo.diff)[3]<- "Future_mean_diff.combo.b"
   names(combo.lwr.diff)[3]<- "Future_cold_diff.combo.b"
   names(combo.upr.diff)[3]<- "Future_warm_diff.combo.b"
+  names(combo.percdiff)[3]<- "Future_mean_percdiff.combo.b"
+  names(combo.lwr.percdiff)[3]<- "Future_cold_percdiff.combo.b"
+  names(combo.upr.percdiff)[3]<- "Future_warm_percdiff.combo.b"
   
   projections.dat<- sdm.map.base.p %>%
     left_join(., sdm.map.fut.mu.p, by = c("x", "y")) %>%
@@ -1150,6 +1285,9 @@ for(i in seq_along(res.files)){
     left_join(., sdm.diff.p, by = c("x", "y")) %>%
     left_join(., sdm.lwr.diff.p, by = c("x", "y")) %>%
     left_join(., sdm.upr.diff.p, by = c("x", "y")) %>%
+    left_join(., sdm.percdiff.p, by = c("x", "y")) %>%
+    left_join(., sdm.lwr.percdiff.p, by = c("x", "y")) %>%
+    left_join(., sdm.upr.percdiff.p, by = c("x", "y")) %>%
     left_join(., sdm.map.base.b, by = c("x", "y")) %>%
     left_join(., sdm.map.fut.mu.b, by = c("x", "y")) %>%
     left_join(., sdm.map.fut.pct05.b, by = c("x", "y")) %>%
@@ -1157,20 +1295,26 @@ for(i in seq_along(res.files)){
     left_join(., sdm.diff.b, by = c("x", "y")) %>%
     left_join(., sdm.lwr.diff.b, by = c("x", "y")) %>%
     left_join(., sdm.upr.diff.b, by = c("x", "y")) %>%
+    left_join(., sdm.percdiff.b, by = c("x", "y")) %>%
+    left_join(., sdm.lwr.percdiff.b, by = c("x", "y")) %>%
+    left_join(., sdm.upr.percdiff.b, by = c("x", "y")) %>%
     left_join(., combo.map.base, by = c("x", "y")) %>%
     left_join(., combo.map.fut.mu, by = c("x", "y")) %>%
     left_join(., combo.map.fut.pct05, by = c("x", "y")) %>%
     left_join(., combo.map.fut.pct95, by = c("x", "y")) %>%
     left_join(., combo.diff, by = c("x", "y")) %>%
     left_join(., combo.lwr.diff, by = c("x", "y")) %>%
-    left_join(., combo.upr.diff, by = c("x", "y"))
+    left_join(., combo.upr.diff, by = c("x", "y")) %>%
+    left_join(., combo.percdiff, by = c("x", "y")) %>%
+    left_join(., combo.lwr.percdiff, by = c("x", "y")) %>%
+    left_join(., combo.upr.percdiff, by = c("x", "y"))
   projections.dat$COMNAME<- spp
   projections.dat$SEASON<- season
   projections.dat<- projections.dat %>%
     gather(., "Proj.Class", "Projection", -x, -y, -COMNAME, -SEASON) %>%
     group_by(., COMNAME, SEASON, Proj.Class) %>%
     nest(.key = "Projections")
-  
+    
   if(i == 1){
     result<- projections.dat
     print(paste(spp, season, "is done!", sep = " "))
@@ -1182,34 +1326,1240 @@ for(i in seq_along(res.files)){
 
 saveRDS(result, file = paste(out.dir, "SDMPredictions.rds", sep = ""))
 
-######
-## SDM vs. Expert expectations: Sensitivity = magnitude of change, Directional effect = net change. 
-######
-out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_09222018/"
 
-jon.df<- read_csv("~/GitHub/COCA/Data/Jon_QualitativeResults.csv")
-dat.full<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) 
+# Predictions summarized for communities ----------------------------------------------
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
+fish_avail_func<- function(df) {
+  
+  if(FALSE){
+    data = results %>%
+      filter(., COMNAME == "ATLANTIC HALIBUT" & Proj.Class == "Future_mean_percdiff.combo.b")
+    df = data$Projections[[1]]
+    update = paste(dat.full$COMNAME[[row.use]], dat.full$SEASON[[row.use]], sep = ".")
+  }
+  
+  dat.sp<- data.frame("x" = df$x, "y" = df$y, "z" = df$Projection)
+  coordinates(dat.sp)<- ~x+y
+  proj4string(dat.sp)<- proj.wgs84
+  
+  pts.rast<- rasterize(dat.sp, port.foots.stack[[1]], field = "z", fun = mean, na.rm = TRUE)
+  pts.rast<- raster::resample(pts.rast, port.foots.stack[[1]])
+  
+  res.mean<- vector(length = raster::nlayers(port.foots.stack), mode = "double")
+  res.mean[]<- NA
+  res.sd<- vector(length = raster::nlayers(port.foots.stack), mode = "double")
+  res.sd[]<- NA
+  
+  for(i in 1:raster::nlayers(port.foots.stack)) {
+    lay.use<- port.foots.stack[[i]]
+    
+    if(all(is.na(values(lay.use)))){
+      res.mean[i]<- NA
+      res.sd[i]<- NA
+    } else {
+      m <- c(0, Inf, 1,  -Inf, 0, 0)
+      rclmat <- matrix(m, ncol=3, byrow=TRUE)
+      lay.bin<- raster::reclassify(lay.use, rclmat)
+      
+      # Get coordinates of footprint
+      foot.pts <- data.frame(rasterToPoints(lay.bin, function(x) x == 1))
+      coordinates(foot.pts)<- ~x+y
+      proj4string(foot.pts)<- proj.wgs84
+      
+      # Okay, we need the projected values at those points and then the proportion of catch at each to use as the weights. 
+      # Projected p(presence)
+      proj.vals<- raster::extract(pts.rast, foot.pts)
+      # Proportion of catch
+      proj.weights<- raster::extract(lay.use, foot.pts)
+      
+      # Mean and SD
+      if(all(is.na(proj.vals))) {
+        res.mean[i]<- NA
+        res.sd[i]<- NA
+      } else {
+        if(length(proj.vals) == 1){
+          res.mean[i]<- mean(proj.vals, na.rm = T)
+          res.sd[i]<- NA
+        } else {
+          res.mean[i]<- mean(proj.vals, na.rm = T)
+          res.sd[i]<- sd(proj.vals, na.rm = T)
+        }
+      }
+    }
+  }
+  
+  out<- data.frame("Port" = names(port.foots.stack), "Mean.Avail" = res.mean, "SD.Avail" = res.sd)
+  return(out)
+}
+
+# Bring in fishing footprints
+all.foot.dat<- readRDS("~/GitHub/COCA/Data/VTR fishing footprints by community and gear type 2011-2015.rds")
+ports.names<- all.foot.dat$JGS.COMMUNITY
+
+# Are there any "empty" footprints?
+foot.data<- all.foot.dat[[3]]
+names(foot.data)<- paste(ports.names, all.foot.dat$COST_ID, sep = "_")
+
+foot.data.df<- bind_rows(foot.data, .id = "id") %>%
+  group_by(., id) %>%
+  nest() %>%
+  mutate(., "Rows" = map(data, nrow))
+
+# No...
+
+# Spatial projections
+proj.wgs84<- "+init=epsg:4326" #WGS84
+proj.utm<- "+init=epsg:2960" #UTM 19
+
+# Some work on the names
+ports.names<- gsub("\\_(?=[^_]*\\_)", " ", ports.names, perl = TRUE)
+ports.names<- gsub(' +', ' ', ports.names)
+ports.names<- gsub("/", " ", ports.names)
+
+port.and.state<- strsplit(ports.names, split = "_")
+
+ports.geo<- data.frame("PortName" = unlist(lapply(port.and.state, "[", 1)), "PortState" = unlist(lapply(port.and.state, "[", 2)))
+
+# Let's get the lat and long for these areas -- first write it out to do some small edits
+google.api<- "AIzaSyDqGwT79r3odaMl0Hksx9GZhHmqe37KSEQ"
+register_google(key = google.api)
+geos.longlats<- geocode(location = unique(paste(ports.geo$PortName, ports.geo$PortState)), output = "latlon")
+geo.merge<- data.frame("PortMerge" = unique(paste(ports.geo$PortName, ports.geo$PortState)), "Long" = geos.longlats$lon, "Lat" = geos.longlats$lat)
+
+ports.geo<- ports.geo %>%
+  mutate(., PortMerge = paste(PortName, PortState)) %>%
+  left_join(., geo.merge)
+
+ports.geo$JGSCommunity<- all.foot.dat$JGS.COMMUNITY
+
+# Fishing port footprints -- gear type specific
+gear.types<- all.foot.dat$COST_ID
+gear.types<- ifelse(gear.types == 1, "Dredge",
+                    ifelse(gear.types == 2, "Gillnet",
+                           ifelse(gear.types == 3, "Longline",
+                                  ifelse(gear.types == 4, "Pot/Trap",
+                                         ifelse(gear.types == 5, "Purse/Seine",
+                                                ifelse(gear.types == 6, "Trawl", "Other"))))))
+port.foot.names<- paste(ports.names, gear.types, sep = "-")
+
+# Safe vs. unsafe
+unsafe<- TRUE
+if(unsafe){
+  ports.all.foots<- all.foot.dat$JGS.COMMUNITY.GEAR.FOOTPRINTS
+} else {
+  ports.all.foots<- all.foot.dat$JGS.NOAA.SAFE.COMMUNITY.GEAR.FOOTPRINTS
+  
+}
+ports.all.foots<- all.foot.dat$JGS.COMMUNITY.GEAR.FOOTPRINTS
+names(ports.all.foots)<- port.foot.names
+
+# Get proportion layer we want for each port-gear type
+port.foots<- unlist(lapply(ports.all.foots, "[", 3))
+port.foots.stack<- raster::stack(port.foots) # 476 layers
+names1<- names(port.foots.stack)
+rast.ind<- nlayers(port.foots.stack)
+
+# Also need an "all gear" option and a max distance option
+if(unsafe){
+  ports.only<- str_replace_all(names(port.foots.stack), c(".Pot.Trap.JGS.PROPORTION" = "", ".Other.JGS.PROPORTION" = "", ".Gillnet.JGS.PROPORTION" = "", ".Trawl.JGS.PROPORTION" = "", ".Dredge.JGS.PROPORTION" = "", ".Purse.Seine.JGS.PROPORTION" = "", ".Longline.JGS.PROPORTION" = ""))
+} else {
+  ports.only<- str_replace_all(names(port.foots.stack), c(".Pot.Trap.JGS.SAFE.PROPORTION" = "", ".Other.JGS.SAFE.PROPORTION" = "", ".Gillnet.JGS.SAFE.PROPORTION" = "", ".Trawl.JGS.SAFE.PROPORTION" = "", ".Dredge.JGS.SAFE.PROPORTION" = "", ".Purse.Seine.JGS.SAFE.PROPORTION" = "", ".Longline.JGS.SAFE.PROPORTION" = ""))
+}
+
+ports.unique<- unique(ports.only) # 126 ports
+
+all.stack<- stack()
+
+for(i in 1:length(ports.unique)){
+  port.use<- ports.unique[i]
+  port.foots.ind<- which(grepl(port.use, names(port.foots.stack)), arr.ind = T)
+  stack.use<- port.foots.stack[[port.foots.ind]]
+  if(nlayers(stack.use) == 1){
+    all.gear.out<- stack.use[[1]]
+  } else {
+    all.gear.out<- calc(stack.use, sum, na.rm = T)
+  }
+  all.stack<- raster::stack(all.stack, all.gear.out)
+}
+
+# Combine
+if(unsafe){
+  names.all<- c(names1, paste(ports.unique, ".All.JGS.PROPORTION", sep = ""))
+} else {
+  names.all<- c(names1, paste(ports.unique, ".All.JGS.SAFE.PROPORTION", sep = ""))
+}
+check.stack<- raster::stack(port.foots.stack, all.stack)
+names(check.stack)<- names.all
+port.foots.stack<- check.stack
+
+# Now max distance option
+dist.fac<- 1.5
+
+# Similar loop, but we don't want to do this for the "All gear" scenario...
+if(unsafe){
+  port.foots.stack.noall<- port.foots.stack[[-which(grepl(".All.JGS.PROPORTION", names(port.foots.stack)))]]
+} else {
+  port.foots.stack.noall<- port.foots.stack[[-which(grepl(".All.JGS.SAFE.PROPORTION", names(port.foots.stack)))]]
+}
+
+# Empty stack for results
+stack.maxd<- stack()
+
+# Loop
+for(i in 1:nlayers(port.foots.stack.noall)){
+  lay.use<- port.foots.stack.noall[[i]]
+  
+  if(unsafe){
+    port.name.use<- str_replace_all(names(lay.use), c(".Pot.Trap.JGS.PROPORTION" = "", ".Other.JGS.PROPORTION" = "", ".Gillnet.JGS.PROPORTION" = "", ".Trawl.JGS.PROPORTION" = "", ".Dredge.JGS.PROPORTION" = "", ".Purse.Seine.JGS.PROPORTION" = "", ".Longline.JGS.PROPORTION" = ""))
+  } else {
+    port.name.use<- str_replace_all(names(lay.use), c(".Pot.Trap.JGS.SAFE.PROPORTION" = "", ".Other.JGS.SAFE.PROPORTION" = "", ".Gillnet.JGS.SAFE.PROPORTION" = "", ".Trawl.JGS.SAFE.PROPORTION" = "", ".Dredge.JGS.SAFE.PROPORTION" = "", ".Purse.Seine.JGS.SAFE.PROPORTION" = "", ".Longline.JGS.SAFE.PROPORTION" = ""))
+  }
+  pt.use<- unique(ports.geo[str_replace_all(ports.geo$JGSCommunity, "[^[:alnum:]]", "") == str_replace_all(port.name.use, "[^[:alnum:]]", ""),])
+  coordinates(pt.use)<- ~Long+Lat
+  proj4string(pt.use)<- proj.wgs84
+  
+  # Get distance from port, then get maximum distance given fishing for max dist and maxdist * 1.5
+  dist.rast<- distanceFromPoints(lay.use, pt.use)
+  max.d<- dist.rast
+  max.d.maxval<- maxValue(raster::mask(dist.rast, lay.use))
+  max.d[max.d >= max.d.maxval]<- NA
+  max.d<- raster::mask(max.d, lay.use, inverse = T)
+  
+  max.d.fac<- dist.rast
+  max.d.fac[max.d.fac >= max.d.maxval*dist.fac]<- NA
+  max.d.fac<- raster::mask(max.d.fac, lay.use, inverse = T)
+  
+  stack.maxd<- raster::stack(stack.maxd, max.d, max.d.fac)
+  print(port.name.use)
+}
+
+# Combine
+if(unsafe){
+  names.stackmaxd<- paste(rep(names(port.foots.stack.noall), each = 2), c("MaxD.JGS.PROPORTION", "1.5xMaxD.JGS.PROPORTION"), sep = "")
+} else {
+  names.stackmaxd<- paste(rep(names(port.foots.stack.noall), each = 2), c("MaxD.JGS.SAFE.PROPORTION", "1.5xMaxD.JGS.SAFE.PROPORTION"), sep = "")
+}
+names(stack.maxd)<- names.stackmaxd
+names.all<- c(names(port.foots.stack), names.stackmaxd)
+check.stack<- raster::stack(port.foots.stack, stack.maxd)
+names(check.stack)<- names.all
+port.foots.stack<- check.stack
+
+# Plots
+if(FALSE){
+  gsub_func1<- function(pattern, replacement, string){
+    out<- gsub(paste(pattern, ".", sep = ""), replacement, string)
+    return(out)
+  }
+  
+  gsub_func2<- function(pattern, replacement, string){
+    out<- gsub(pattern, replacement, string)
+    return(out)
+  }
+  
+  #Bounds
+  xlim.use<- c(-77, -65)
+  ylim.use<- c(35, 45)
+  
+  states <- c("Maine", "New Hampshire", "Massachusetts", "Vermont", "New York", "Rhode Island", "Connecticut", "Delaware", "New Jersey", "Maryland", "Pennsylvania", "Virginia", "North Carolina", "South Carolina", "Georgia", "Florida", "District of Columbia", "West Virgina")
+  provinces <- c("Ontario", "Québec", "Nova Scotia", "New Brunswick")
+  
+  us <- raster::getData("GADM",country="USA",level=1)
+  us.states <- us[us$NAME_1 %in% states,]
+  us.states <- gSimplify(us.states, tol = 0.025, topologyPreserve = TRUE)
+  canada <- raster::getData("GADM",country="CAN",level=1)
+  ca.provinces <- canada[canada$NAME_1 %in% provinces,]
+  ca.provinces <- gSimplify(ca.provinces, tol = 0.025, topologyPreserve = TRUE)
+  
+  us.states.f<- fortify(us.states, NAME_1)
+  ca.provinces.f<- fortify(ca.provinces, NAME_1)
+  
+  focal.ports<- c("STONINGTON.ME", "PORTLAND.ME", "NEW_BEDFORD.MA", "POINT_JUDITH.RI")
+  port.foots.focal<-  port.foots.stack[[which(str_detect(names(port.foots.stack), paste(focal.ports, collapse = "|")))]]
+  gear.types<- c("Dredge", "Gillnet", "Longline", "Pot.Trap", "Purse.Seine", "Trawl", "Other")
+  
+  # Make panel plot for each gear type: Ports as rows, Fishing footprint as columns
+  for(i in seq_along(gear.types)){
+    port.foots.use<- port.foots.focal[[which(str_detect(names(port.foots.focal), gear.types[i]))]]
+    names(port.foots.use)<- str_replace_all(names(port.foots.use), c(".JGS.SAFE.PROPORTION" = ""))
+    
+    out.df<- as.data.frame(port.foots.use, xy = T) %>%
+      gather(., "Port_Gear", "Z", -x, -y)
+    
+    gear.replace<- paste('.', gear.types[i], sep = '')
+    out.df$Port<- gsub(gear.replace, "", out.df$Port_Gear)
+    out.df$Port<- gsub("MaxD", "", out.df$Port)
+    out.df$Port<- gsub("1.5x", "", out.df$Port)
+    out.df<- out.df %>%
+      as_tibble() %>%
+      mutate(., "Gear" = pmap(list(pattern = Port, replacement = list(""), string = Port_Gear), gsub_func1)) %>%
+      data.frame()
+    out.df$Footprint<- ifelse(str_detect(out.df$Port_Gear, "1.5x"), "1.5xExtended", 
+                              ifelse(str_detect(out.df$Port_Gear, "MaxD"), "Extended", "Regular"))
+    out.df$Z<- ifelse(out.df$Z > 0, "Fished", out.df$Z)
+    out.df$Footprint<- factor(out.df$Footprint, levels = c("Regular", "Extended", "1.5xExtended"))
+    
+    plot.out<- ggplot() + 
+      geom_tile(data = out.df, aes(x = x, y = y, fill = Z), show.legend = FALSE) +
+      scale_fill_manual(values = "#31a354", na.value = "white") +
+      geom_map(data = us.states.f, map = us.states.f,
+               aes(map_id = id, group = group),
+               fill = "gray65", color = "gray45", size = 0.15) +
+      geom_map(data = ca.provinces.f, map = ca.provinces.f,
+               aes(map_id = id, group = group),
+               fill = "gray65", color = "gray45", size = 0.15) +
+      ylim(ylim.use) + ylab("Lat") +
+      scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
+      coord_fixed(1.3) + 
+      theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.text=element_text(size=8), legend.title=element_text(size=8)) +
+      ggtitle(gear.types[i]) +
+      facet_wrap(~Port+Footprint, ncol = 3)
+    ggsave(paste(out.dir, gear.types[i], "Footprints.jpg", sep = ""), plot.out, width = 11, height = 8, units = "in")
+  }
+}
+
+# Read in results and apply fish availability function to each of the projections datasets
+results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = ""))
+
+# Quick check --
+results.check<- results %>%
+  group_by(., COMNAME, SEASON) %>%
+  summarize(.,
+            "Projections" = n_distinct(Proj.Class))
+
+# Looks good. Now overlay fishing footprints.
+results<- results %>%
+  mutate(., "Fish.Availability" = map(Projections, possibly(fish_avail_func, NA)))
+
+saveRDS(results, paste(out.dir, "FishAvailability.rds", sep = ""))
+
+# Ideally, we want species-season-port and then all the changes as columns...
+results<- readRDS(paste(out.dir, "FishAvailability.rds", sep = ""))
+results$spp.season<- paste(results$COMNAME, results$SEASON, sep = ".")
+spp.season<- paste(rep(unique(results$COMNAME), each = 2), rep(c("FALL", "SPRING")), sep = ".")
+
+for(i in seq_along(spp.season)){
+  dat.temp<- results[results$spp.season == spp.season[i],]
+  
+  if(nrow(dat.temp) == 0){
+    print(paste(spp.season[i], " is done!", sep = " "))
+    next()
+  }
+  
+  dat.temp<- dat.temp %>% 
+    dplyr::select(., COMNAME, SEASON, Proj.Class, Fish.Availability) %>%
+    unnest(Fish.Availability) %>%
+    gather(., "Stat", "Value", -COMNAME, -SEASON, -Proj.Class, -Port) %>%
+    unite(Port.Stat, Port, Stat) %>%
+    spread(Proj.Class, Value) %>%
+    separate(Port.Stat, c("Port", "Stat"), sep =  "_(?=[^_]+$)")
+  dat.temp$Stat<- str_replace_all(dat.temp$Stat, c(".Avail" = ""))
+  
+  if(i == 1){
+    result<- dat.temp
+    print(paste(spp.season[i], " is done!", sep = " "))
+  } else {
+    result<- bind_rows(result, dat.temp)
+    print(paste(spp.season[i], "is done!", sep = " "))
+  }
+}
+
+# Change all SD stat percent changes to NA
+result$Future_mean_percdiff.combo.b[result$Stat == "SD"]<- NA
+result$Future_cold_percdiff.combo.b[result$Stat == "SD"]<- NA
+result$Future_warm_percdiff.combo.b[result$Stat == "SD"]<- NA
+
+result$Future_mean_percdiff.combo.b<- as.numeric(unlist(result$Future_mean_percdiff.combo.b))
+result$Future_cold_percdiff.combo.b<- as.numeric(unlist(result$Future_cold_percdiff.combo.b))
+result$Future_warm_percdiff.combo.b<- as.numeric(unlist(result$Future_warm_percdiff.combo.b))
+
+# Group by species and Port, take column means
+out<- result %>% 
+  group_by(COMNAME, Port, Stat) %>%
+  summarize_if(is.double, mean, na.rm = T) %>%
+  arrange(., COMNAME, Stat, Port)
+
+# Separate Port and Gear Type
+port.data.out<- out
+names(port.data.out)[2]<- "Port_GearType"
+
+# First Do gear types...
+port.data.out$Gear<- ifelse(grepl(".Pot.Trap", port.data.out$Port_GearType), "Pot.Trap",
+                            ifelse(grepl(".Gillnet", port.data.out$Port_GearType), "Gillnet",
+                                   ifelse(grepl(".Longline", port.data.out$Port_GearType), "Longline",
+                                          ifelse(grepl(".Dredge", port.data.out$Port_GearType), "Dredge",
+                                                 ifelse(grepl(".Purse.Seine", port.data.out$Port_GearType), "Purse.Seine",
+                                                        ifelse(grepl(".Trawl", port.data.out$Port_GearType), "Trawl",
+                                                               ifelse(grepl(".All", port.data.out$Port_GearType), "All", "Other")))))))
+
+if(unsafe){
+  port.data.out$Footprint<- ifelse(str_detect(port.data.out$Port_GearType, "1.5xMaxD.JGS.PROPORTION"), "1.5xMaxD", "Regular")
+  port.data.out$Footprint<- ifelse(str_detect(port.data.out$Port_GearType, "MaxD.JGS.PROPORTION") & port.data.out$Footprint == "Regular", "MaxD", port.data.out$Footprint)
+  
+  port.data.out$Port.OnlyTemp<- str_replace_all(port.data.out$Port_GearType, c(".JGS.PROPORTION"), "") 
+  port.data.out$Port.OnlyTemp2<- str_replace_all(port.data.out$Port.OnlyTemp, c("1.5xMaxD"), "")
+  port.data.out$Port.OnlyTemp3<- str_replace_all(port.data.out$Port.OnlyTemp2, c("MaxD"), "")
+  port.data.out$Port.Only<- str_replace_all(port.data.out$Port.OnlyTemp3, c(".Pot.Trap" = "", ".Dredge" = "", ".Longline" = "", ".All" = "", ".Other" = "", ".Gillnet" = "", ".Trawl" = "", ".Purse.Seine" = ""))
+} else {
+  port.data.out$Footprint<- ifelse(str_detect(port.data.out$Port_GearType, "1.5xMaxD.JGS.SAFE.PROPORTION"), "1.5xMaxD", "Regular")
+  port.data.out$Footprint<- ifelse(str_detect(port.data.out$Port_GearType, "MaxD.JGS.SAFE.PROPORTION") & port.data.out$Footprint == "Regular", "MaxD", port.data.out$Footprint)
+  
+  port.data.out$Port.OnlyTemp<- str_replace_all(port.data.out$Port_GearType, c(".JGS.SAFE.PROPORTION"), "") 
+  port.data.out$Port.OnlyTemp2<- str_replace_all(port.data.out$Port.OnlyTemp, c("1.5xMaxD"), "")
+  port.data.out$Port.OnlyTemp3<- str_replace_all(port.data.out$Port.OnlyTemp2, c("MaxD"), "")
+  port.data.out$Port.Only<- str_replace_all(port.data.out$Port.OnlyTemp3, c(".Pot.Trap" = "", ".Dredge" = "", ".Longline" = "", ".All" = "", ".Other" = "", ".Gillnet" = "", ".Trawl" = "", ".Purse.Seine" = ""))
+}
+
+# Community and State
+comm.names.split<- strsplit(port.data.out$Port.Only, "_\\s*(?=[^_]+$)", perl=TRUE)
+port.data.out$CommunityOnly<- unlist(lapply(comm.names.split, "[", 1))
+port.data.out$StateOnly<- unlist(lapply(comm.names.split, "[", 2))
+
+port.data.out<- port.data.out %>%
+  ungroup() %>%
+  dplyr::select(., COMNAME, Port_GearType, CommunityOnly, StateOnly, Gear, Footprint, colnames(port.data.out)[3:27]) %>%
+  gather(., "ProjectionScenario", "Value", -COMNAME, -Port_GearType, -CommunityOnly, -StateOnly, -Gear, -Footprint, -Stat) %>%
+  dplyr::select(., COMNAME, CommunityOnly, StateOnly, Gear, Footprint, ProjectionScenario, Stat, Value)
+
+write_csv(port.data.out, paste(out.dir, "SppPortGearData_03152019.csv", sep = ""))
+
+## A bit of clean up -- Kathy and Brian probably don't need all of this stuff
+ProjectionScenario.Keep<- c("Baseline.combo.b", "Future_mean.combo.b", "Future_mean_diff.combo.b", "Future_mean_percdiff.combo.b", "Future_warm.combo.b", "Future_warm_diff.combo.b", "Future_warm_percdiff.combo.b",  "Future_cold.combo.b", "Future_cold_diff.combo.b", "Future_cold_percdiff.combo.b")
+port.data.out.filtered<- port.data.out %>%
+  filter(., Footprint == "Regular" & Stat == "Mean") %>%
+  filter(., ProjectionScenario %in% ProjectionScenario.Keep)
+write_csv(port.data.out.filtered, paste(out.dir, "SppPortGearData_Filtered_03152019.csv", sep = ""))
+
+# Let's add in CFDERRS ports...
+vtr.cfderrs.table<- read_csv("~/GitHub/COCA-EcoAndEcon/Results/VTR_CFDERRS_Comparison_Edited_NoCounties.csv")
+port.data.out$VTRMergeName<- paste(str_replace_all(port.data.out$CommunityOnly, "[^[:alnum:]]", ""), port.data.out$StateOnly, sep = "")
+
+vtr.cfderrs.table$VTRMergeName<- paste(str_replace_all(vtr.cfderrs.table$CommunityOnly, "[^[:alnum:]]", ""), vtr.cfderrs.table$StateOnly, sep = "")
+
+port.data.out<- port.data.out %>%
+  left_join(., vtr.cfderrs.table, by = "VTRMergeName")
+
+# Clean up
+port.data.out<- port.data.out %>%
+  dplyr::select(., COMNAME, JGS, PORT, BRAD_PORT_NAME_STATE, Gear, Footprint, ProjectionScenario, Stat, Value)
+colnames(port.data.out)<- c("CommonName", "Community", "CFDERSPortCode", "CFDERSPortName", "Gear", "Footprint", "ProjectionScenario", "Statistic", "Value")
+
+port.data.out$Gear<- gsub("[.]", "_", port.data.out$Gear)
+write.csv(port.data.out, "~/GitHub/COCA/Results/PortData03152019.csv")
+
+# Filter for Brad...
+scenarios.keep<- c("Baseline.combo.b", "Future_mean.combo.b", "Future_mean_diff.combo.b", "Future_mean_percdiff.combo.b", "Future_cold.combo.b", "Future_cold_diff.combo.b", "Future_cold_percdiff.combo.b", "Future_warm.combo.b", "Future_warm_diff.combo.b", "Future_warm_percdiff.combo.b")
+brad<- port.data.out %>%
+  filter(., Statistic == "Mean" & ProjectionScenario %in% c("Baseline.combo.b", "Future_mean.combo.b", "Future_mean_diff.combo.b", "Future_mean_percdiff.combo.b", "Future_cold.combo.b", "Future_cold_diff.combo.b", "Future_cold_percdiff.combo.b", "Future_warm.combo.b", "Future_warm_diff.combo.b", "Future_warm_percdiff.combo.b")) 
+
+# Add in CFDERS common names
+cfders.sppnames<- read_csv("~/GitHub/COCA/Data/spp_names_stripcommas.csv") %>%
+  dplyr::select(., comma_names, nice_names)
+colnames(cfders.sppnames)<- c("CFDERSCommonName", "CommonName")
+
+brad<- brad %>%
+  left_join(., cfders.sppnames) %>%
+  dplyr::select(., c("CommonName", "CFDERSCommonName", "Community", "CFDERSPortCode", "CFDERSPortName", "Gear", "Footprint", "ProjectionScenario", "Statistic", "Value")
+  )
+write.csv(brad, "~/GitHub/COCA/Results/EcoToEconPortData03152019.csv")
+
+
+# Results — Filtering, always run -----------------------------------------------
+# Real data
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
+mod.res<- read_csv(paste(out.dir, "mod.results.csv", sep = "")) %>%
+  drop_na(RMSE.SDM.B, CorrCoeff.SDM.B, Bias.SDM.B, RMSE.NEVA.B, CorrCoeff.NEVA.B, Bias.NEVA.B)
+
+# Exploring cut offs... AUC > 0.7 in both seasons
+mod.spp.keep<- mod.res %>%
+  filter(., AUC.SDM >= 0.7 & CorrCoeff.SDM.B >= 0) %>%
+  group_by(., COMNAME) %>%
+  summarize_at(vars(SEASON), n_distinct) %>%
+  filter(., SEASON == 2)
+
+mod.res<- mod.res %>%
+  filter(., COMNAME %in% mod.spp.keep$COMNAME)
+
+# Results — Taylor diagrams -----------------------------------------------
+# Getting maxSD for plotting
+maxsd<- max(mod.res$Bias.SDM.B, 1)
+sd.r<- 1
+
+# Empty plot first
+# Creating empty plot first
+plot.base<- ggplot() + 
+  scale_x_continuous(name = "Standard deviation (normalized)", limits = c(0, maxsd), breaks = seq(from = 0, to = maxsd, by = 0.5)) +
+  scale_y_continuous(name = "Standard deviation (normalized)", limits = c(0, maxsd), breaks = seq(from = 0, to = maxsd, by = 0.5)) +
+  theme_classic()
+
+# Coeff D rays 
+grad.corr.lines = c(0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0)
+for(i in 1:length(grad.corr.lines)){
+  x.vec<- c(0, maxsd*grad.corr.lines[i])
+  y.vec<- c(0, maxsd*sqrt(1 - grad.corr.lines[i]^2))
+  
+  if(i ==1){
+    coeffd.rays.df<- data.frame("Ray" = rep(1, length(x.vec)), "x" = x.vec, "y" = y.vec)
+  } else {
+    temp<- data.frame("Ray" = rep(i, length(x.vec)), "x" = x.vec, "y" = y.vec)
+    coeffd.rays.df<- bind_rows(coeffd.rays.df, temp)
+  }
+}
+
+# Add rays
+plot.coeffd<- plot.base +
+  geom_line(data = coeffd.rays.df, aes(x = x, y = y, group = Ray), lty = "longdash", col = "lightgray")
+
+coeffd.labs<- coeffd.rays.df %>%
+  group_by(Ray) %>%
+  summarize(., 
+            "x" = max(x, na.rm = TRUE), 
+            "y" = max(y, na.rm = TRUE)) %>%
+  data.frame()
+
+coeffd.labs$Label<- grad.corr.lines
+
+plot.coeffd<- plot.coeffd +
+  geom_label(data = coeffd.labs, aes(x = x, y = y, label = Label), color = "gray", fill = "white", label.size = NA)
+
+# SD arcs
+# Need to add in SD arcs
+sd.arcs<- seq(from = 0, to = maxsd, by = 0.5)
+
+for(i in 1:length(sd.arcs)){
+  x.vec<- sd.arcs[i]*cos(seq(0, pi/2, by = 0.03))
+  y.vec<- sd.arcs[i]*sin(seq(0, pi/2, by = 0.03))
+  
+  if(i ==1){
+    sd.arcs.df<- data.frame("Arc" = rep(sd.arcs[1], length(x.vec)), "x" = x.vec, "y" = y.vec)
+  } else {
+    temp<- data.frame("Arc" = rep(sd.arcs[i], length(x.vec)), "x" = x.vec, "y" = y.vec)
+    sd.arcs.df<- bind_rows(sd.arcs.df, temp)
+  }
+}
+
+# Add arcs to plot.base
+plot.sd<- plot.coeffd +
+  geom_line(data = sd.arcs.df, aes(x = x, y = y, group = Arc), lty = "dotted", color = "lightgray") 
+
+# Now gamma? -- Standard deviation arcs around the reference point
+gamma<- pretty(c(0, maxsd), n = 4)[-1]
+gamma<- gamma[-length(gamma)]
+labelpos<- seq(45, 70, length.out = length(gamma))
+
+for(gindex in 1:length(gamma)) {
+  xcurve <- cos(seq(0, pi, by = 0.03)) * gamma[gindex] + sd.r
+  endcurve <- which(xcurve < 0)
+  endcurve <- ifelse(length(endcurve), min(endcurve) - 1, 105)
+  ycurve <- sin(seq(0, pi, by = 0.03)) * gamma[gindex]
+  maxcurve <- xcurve * xcurve + ycurve * ycurve
+  startcurve <- which(maxcurve > maxsd * maxsd)
+  startcurve <- ifelse(length(startcurve), max(startcurve) + 1, 0)
+  x.vec<- xcurve[startcurve:endcurve]
+  y.vec<- ycurve[startcurve:endcurve]
+  
+  if(gindex ==1){
+    gamma.df<- data.frame("Gamma" = rep(gamma[1], length(x.vec)), "x" = x.vec, "y" = y.vec)
+  } else {
+    temp<- data.frame("Gamma" = rep(gamma[gindex], length(x.vec)), "x" = x.vec, "y" = y.vec)
+    gamma.df<- bind_rows(gamma.df, temp)
+  }
+}
+
+gamma.df$Gamma<- factor(gamma.df$Gamma, levels = unique(gamma.df$Gamma))
+
+# Add em
+plot.gamma<- plot.sd +
+  geom_line(data = gamma.df, aes(x = x, y = y, group = Gamma), lty = "solid", col = "lightgray")
+
+# Label...
+gamma.labs<- gamma.df %>%
+  group_by(Gamma) %>%
+  summarize("x" = mean(x, na.rm = TRUE), 
+            "y" = median(y, na.rm = TRUE))
+
+plot.gamma<- plot.gamma +
+  geom_label(data = gamma.labs, aes(x = x, y = y, label = Gamma), color = "gray", fill = "white", label.size = NA)
+
+# Add in reference point
+plot.all<- plot.gamma +
+  geom_point(aes(x = sd.r, y = 0), color = "black", size = 2.75)
+
+# Add in species points
+mod.results.td<- mod.res %>%
+  mutate(., "TD.X" = Bias.SDM.B * CorrCoeff.SDM.B,
+         "TD.Y" = Bias.SDM.B * sin(acos(CorrCoeff.SDM.B)))
+
+# Join with functional groups
+func.groups<- read.csv("~/GitHub/COCA/Data/JHareSppFunctionalGroup.csv")
+func.groups$COMNAME<- toupper(func.groups$COMNAME)
+
+mod.results.td<- mod.results.td %>%
+  left_join(., func.groups)
+mod.results.td$COMNAME<- to_sentence_case(mod.results.td$COMNAME)
+
+# Faceting isn't working and not sure why...loop?
+func.groups<- c("Groundfish", "Pelagic", "Coastal", "Invertebrates", "Diadromous", "Elasmobranch")
+plots.out.f<- vector("list", length(func.groups))
+plots.out.s<- vector("list", length(func.groups))
+
+# Colors stuff -- what is the highest number we will need?
+colors.max<- mod.results.td %>%
+  group_by(SEASON, Functional.Group) %>%
+  summarize(., "Rows" = n())
+colors.n<- max(colors.max$Rows)
+colors<- distinctColorPalette(colors.n)
+
+for(i in seq_along(func.groups)){
+  group.use<- func.groups[i]
+  dat.use.f<- mod.results.td %>%
+    filter(., SEASON == "FALL" & as.character(Functional.Group) == group.use)
+  dat.use.s<- mod.results.td %>%
+    filter(., SEASON == "SPRING" & as.character(Functional.Group) == group.use)
+  
+  if(length(unique(dat.use.f$COMNAME)) == length(colors)){
+    colors.use<- colors
+  } else {
+    colors.use<- sample(colors, length(unique(dat.use.f$COMNAME)))
+  }
+ 
+  plots.out.f[[i]]<- plot.all +
+    geom_point(data = dat.use.f, aes(x = TD.X, y = TD.Y, fill = COMNAME), pch = 21, alpha = 0.85, size = 2.75) +
+    scale_fill_manual(name = "Species", values = colors.use) +
+    geom_text(aes(label = "Correlation coefficient", x = 0.75, y = 0.75), angle = -45)
+  plots.out.s[[i]]<- plot.all +
+    geom_point(data = dat.use.s, aes(x = TD.X, y = TD.Y, fill = COMNAME), pch = 21, alpha = 0.85, size = 2.75) +
+    scale_fill_manual(name = "Species", values = colors.use) +
+    geom_text(aes(label = "Correlation coefficient", x = 0.75, y = 0.75), angle = -45)
+  print(i)
+}
+
+# Arrange in a grid
+out.f<- plot_grid(plots.out.f[[1]], plots.out.f[[2]], plots.out.f[[3]], plots.out.f[[4]], plots.out.f[[5]], plots.out.f[[6]], nrow = 2, labels = func.groups, label_x = 0.25, label_y = 1)
+ggplot2::ggsave(filename = paste(out.dir, "FallTaylorDiagram", ".jpg", sep = ""), plot = out.f, width = 18, height = 10, units = "in")
+out.s<- plot_grid(plots.out.s[[1]], plots.out.s[[2]], plots.out.s[[3]], plots.out.s[[4]], plots.out.s[[5]], plots.out.s[[6]], nrow = 2, labels = func.groups, label_x = 0.25, label_y = 1)
+ggplot2::ggsave(filename = paste(out.dir, "SpringTaylorDiagram", ".jpg", sep = ""), plot = out.s, width = 18, height = 10, units = "in")
+
+# Results — SDM shelfwide and regional changes ----------------------------
+if(FALSE){
+  # Probably easiest if we keep the mod.res file consistent for cutting species. But, if we want to try something else, we could do that here:
+  out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
+  results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) # This should have everything we need. 
+  
+  # Let's get the model fit, too....
+  mod.results<- read.csv(paste(out.dir, "mod.results.csv", sep = ""))
+  dat.full<- results %>%
+    left_join(., mod.results, by = c("COMNAME", "SEASON")) %>%
+    dplyr::select(., -X)
+  dat.full$AUC.SDM[is.na(dat.full$AUC.SDM)]<- 0
+  
+  # Exploring cut offs... at least 5% deviance explained?
+  mod.spp.keep<- mod.results %>%
+    filter(., AUC >= 0.7) %>%
+    group_by(., COMNAME) %>%
+    summarize_at(vars(SEASON), n_distinct) %>%
+    filter(., SEASON == 2)
+  
+  dat.sub<- dat.full %>%
+    filter(., COMNAME %in% mod.spp.keep$COMNAME)
+}
+# Read in projections
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
+results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) # This should have everything we need. 
+
+# Filter species 
+dat.sub<- results %>%
+  filter(., COMNAME %in% mod.res$COMNAME)
+dat.full<- dat.sub
+
+# Spatial projections
+proj.wgs84<- CRS("+init=epsg:4326") #WGS84
+proj.utm<- CRS("+init=epsg:2960") #UTM 19
+
+# NELME
+nelme<- st_read("~/GitHub/COCA/Data/NELME_clipped.shp")
+st_crs(nelme)<- "+init=epsg:4326"
+nelme.sp<- as(nelme, "Spatial")
+
+# GoM
+gom<- st_read("~/GitHub/COCA/Data/GoMPhysioRegions/PhysioRegions_WGS84.shp")
+st_crs(gom)<- "+init=epsg:4326"
+gom<- gom[!gom$Region == "Seamount",] %>%
+  st_union() %>%
+  st_sf()
+gom.sp<- as(st_zm(gom), "Spatial")
+gom.sp<- spTransform(gom.sp, proj.utm)
+gom.sp.wgs<-  spTransform(gom.sp, proj4string(nelme.sp))
+
+# Buffer it a bit
+gom.buff<- gBuffer(gom.sp, width = 7500)
+gom.buff<- spTransform(gom.buff, proj4string(nelme.sp))
+
+# Southern regions
+south<- erase(nelme.sp, gom.buff)
+
+# Still a bit remaining...custom box to get rid of the rest of it
+# Coordinates
+ow<- data.frame("x" = c(-71, -71, -67, -67), "y" = c(42, 46, 46, 42))
+
+# Convert coordinates to Spatial Polygons
+ow.p<- Polygon(ow)
+ow.ps<- Polygons(list(ow.p), 1)
+ow.sp<- SpatialPolygons(list(ow.ps))
+proj4string(ow.sp)<- proj4string(nelme.sp)
+south2<- erase(south, ow.sp)
+proj4string(south2)<- proj4string(nelme.sp)
+
+# Check em ---
+if(FALSE){
+  plot(nelme.sp)
+  plot(gom.sp.wgs, col = "red", add = T)
+  plot(south2, col = "blue", add = T)
+}
+
+# Overlay func
+overlay_func<- function(df, region, proj.use = proj4string(nelme.sp)){
+  dat.use<- data.frame(df)
+  pts.temp<- dat.use
+  coordinates(pts.temp)<- ~x+y
+  proj4string(pts.temp)<- proj.use
+  
+  switch(region,
+         NELME = mean(dat.use[,3], na.rm = T),
+         GOM = mean(data.frame(pts.temp[!is.na(over(pts.temp, as(gom.sp.wgs, "SpatialPolygons"))),])[,3], na.rm = T),
+         South = mean(data.frame(pts.temp[!is.na(over(pts.temp, as(south2, "SpatialPolygons"))),])[,3], na.rm = T))
+}
+
+preds.df.sub<- dat.full %>%
+  mutate(., "NELME.Mean.Change" = purrr::map2(Projections, list("NELME"), possibly(overlay_func, NA)),
+         "GOM.Mean.Change" = purrr::map2(Projections, list("GOM"), possibly(overlay_func, NA)),
+         "South.Mean.Change" = purrr::map2(Projections, list("South"), possibly(overlay_func, NA)))
+
+overlay_perc_func<- function(df.base, df.future, region, proj.use = proj4string(nelme.sp)){
+  dat.use.base<- data.frame(df.base)
+  pts.temp.base<- dat.use.base
+  coordinates(pts.temp.base)<- ~x+y
+  proj4string(pts.temp.base)<- proj.use
+  
+  dat.use.fut<- data.frame(df.future)
+  pts.temp.fut<- dat.use.fut
+  coordinates(pts.temp.fut)<- ~x+y
+  proj4string(pts.temp.fut)<- proj.use
+  
+  base.mean<- switch(region,
+                     NELME = mean(dat.use.base[,3], na.rm = T),
+                     GOM = mean(data.frame(pts.temp.base[!is.na(over(pts.temp.base, as(gom.sp.wgs, "SpatialPolygons"))),])[,3], na.rm = T),
+                     South = mean(data.frame(pts.temp.base[!is.na(over(pts.temp.base, as(south2, "SpatialPolygons"))),])[,3], na.rm = T))
+  
+  fut.mean<- switch(region,
+                    NELME = mean(dat.use.fut[,3], na.rm = T),
+                    GOM = mean(data.frame(pts.temp.fut[!is.na(over(pts.temp.fut, as(gom.sp.wgs, "SpatialPolygons"))),])[,3], na.rm = T),
+                    South = mean(data.frame(pts.temp.fut[!is.na(over(pts.temp.fut, as(south2, "SpatialPolygons"))),])[,3], na.rm = T))
+  
+  perc.out<- 100*((fut.mean - base.mean)/base.mean)
+  return(perc.out)
+}
+
+preds.df.sub.perc<- preds.df.sub %>%
+  dplyr::select(., COMNAME, SEASON, Proj.Class, Projections) %>%
+  spread(., Proj.Class, Projections) %>%
+  mutate(., "NELME.Mean.Perc.Change.mu.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_mean.sdm.p, list("NELME")), possibly(overlay_perc_func, NA)),
+         "NELME.Mean.Perc.Change.mu.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_mean.combo.b, list("NELME")), possibly(overlay_perc_func, NA)),
+         "NELME.Mean.Perc.Change.warm.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_warm.sdm.p, list("NELME")), possibly(overlay_perc_func, NA)),
+         "NELME.Mean.Perc.Change.warm.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_warm.combo.b, list("NELME")), possibly(overlay_perc_func, NA)),
+         "NELME.Mean.Perc.Change.cold.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_cold.sdm.p, list("NELME")), possibly(overlay_perc_func, NA)),
+         "NELME.Mean.Perc.Change.cold.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_cold.combo.b, list("NELME")), possibly(overlay_perc_func, NA)),
+         "GOM.Mean.Perc.Change.mu.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_mean.sdm.p, list("GOM")), possibly(overlay_perc_func, NA)),
+         "GOM.Mean.Perc.Change.mu.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_mean.combo.b, list("GOM")), possibly(overlay_perc_func, NA)),
+         "GOM.Mean.Perc.Change.warm.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_warm.sdm.p, list("GOM")), possibly(overlay_perc_func, NA)),
+         "GOM.Mean.Perc.Change.warm.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_warm.combo.b, list("GOM")), possibly(overlay_perc_func, NA)),
+         "GOM.Mean.Perc.Change.cold.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_cold.sdm.p, list("GOM")), possibly(overlay_perc_func, NA)),
+         "GOM.Mean.Perc.Change.cold.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_cold.combo.b, list("GOM")), possibly(overlay_perc_func, NA)),
+         "South.Mean.Perc.Change.mu.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_mean.sdm.p, list("South")), possibly(overlay_perc_func, NA)),
+         "South.Mean.Perc.Change.mu.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_mean.combo.b, list("South")), possibly(overlay_perc_func, NA)),
+         "South.Mean.Perc.Change.warm.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_warm.sdm.p, list("South")), possibly(overlay_perc_func, NA)),
+         "South.Mean.Perc.Change.warm.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_warm.combo.b, list("South")), possibly(overlay_perc_func, NA)),
+         "South.Mean.Perc.Change.cold.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_cold.sdm.p, list("South")), possibly(overlay_perc_func, NA)),
+         "South.Mean.Perc.Change.cold.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_cold.combo.b, list("South")), possibly(overlay_perc_func, NA)))
+
+preds.df.sub.perc.plot<- preds.df.sub.perc %>%
+  dplyr::select(., COMNAME, SEASON, NELME.Mean.Perc.Change.mu.p, NELME.Mean.Perc.Change.mu.b, NELME.Mean.Perc.Change.warm.p, NELME.Mean.Perc.Change.warm.b, NELME.Mean.Perc.Change.cold.p, NELME.Mean.Perc.Change.cold.b, GOM.Mean.Perc.Change.mu.p, GOM.Mean.Perc.Change.mu.b, GOM.Mean.Perc.Change.warm.p, GOM.Mean.Perc.Change.warm.b, GOM.Mean.Perc.Change.cold.p, GOM.Mean.Perc.Change.cold.b, South.Mean.Perc.Change.mu.p, South.Mean.Perc.Change.mu.b, South.Mean.Perc.Change.warm.p, South.Mean.Perc.Change.warm.b, South.Mean.Perc.Change.cold.p, South.Mean.Perc.Change.cold.b) %>%
+  gather(., "Region_Scenario", "Change", -COMNAME, -SEASON)
+preds.df.sub.perc.plot$Region_Only<- unlist(lapply(strsplit(preds.df.sub.perc.plot$Region_Scenario, "[.]"), "[", 1))
+preds.df.sub.perc.plot$Scenario_Only<- unlist(lapply(strsplit(sub("[.]", "*", preds.df.sub.perc.plot$Region_Scenario), "[*]"), "[", 2))
+preds.df.sub.perc.plot$Response_Only<- ifelse(grepl(".p", preds.df.sub.perc.plot$Scenario_Only, fixed = T), "Presence", "Biomass")
+preds.df.sub.perc.plot$Climate_Only<- ifelse(grepl("mu", preds.df.sub.perc.plot$Region_Scenario), "Mean", 
+                                             ifelse(grepl("warm", preds.df.sub.perc.plot$Region_Scenario), "Warm", "Cold"))
+
+## Alright, we are now after a species - scenario - season - region - mean change dataframe...
+res<- preds.df.sub.perc.plot 
+res$Change<- as.numeric(unlist(res$Change))
+res$Change<- ifelse(res$Change >= 500, 500, res$Change)
+
+# Biomass shelfwide warm and cold...
+plot.type.use<- "Biomass"
+res.plot<- res %>%
+  dplyr::filter(., Response_Only == plot.type.use)
+
+# Lets add a functional group column...
+# Merge with functional groups....
+func.groups<- read.csv("~/GitHub/COCA/Data/JHareSppFunctionalGroup.csv")
+func.groups$COMNAME<- toupper(func.groups$COMNAME)
+
+res.plot<- res.plot %>%
+  left_join(., func.groups, by = "COMNAME")
+res.plot<- res.plot[!is.na(res.plot$Functional.Group),]
+res.plot$Functional.Group<- factor(res.plot$Functional.Group, levels = c("Groundfish", "Pelagic", "Coastal", "Invertebrates", "Diadromous", "Elasmobranch"))
+res.plot<- res.plot %>%
+  dplyr::select(., -Region_Scenario, -Scenario_Only) %>%
+  dplyr::arrange(., COMNAME, Functional.Group, SEASON, Region_Only, Climate_Only, Change)
+res.plot$COMNAME<- factor(res.plot$COMNAME, levels = unique(res.plot$COMNAME))
+res.plot$SEASON<- factor(res.plot$SEASON, levels = c("FALL", "SPRING"))
+res.plot$Climate_Only<- factor(res.plot$Climate_Only, levels = c("Mean", "Warm", "Cold"))
+res.plot$Region_Only<- factor(res.plot$Region_Only, levels = c("NELME", "GOM", "South"))
+
+res.plot.nelme<- res.plot %>%
+  dplyr::filter(., Region_Only == "NELME")
+res.plot.gom<- res.plot %>%
+  dplyr::filter(., Region_Only == "GOM")
+res.plot.south<- res.plot %>%
+  dplyr::filter(., Region_Only == "South")
+
+res.plot.all<- list(res.plot.nelme, res.plot.gom, res.plot.south)
+names(res.plot.all)<- c("NELME", "GoM", "South")
+
+
+## Climate variability across the shelf by season
+df<- data.frame(res.plot.all[[1]])
+df.null<- cbind(expand.grid(COMNAME = levels(res.plot.nelme$COMNAME), SEASON = unique(res.plot.nelme$SEASON), Climate_Only = unique(res.plot.nelme$Climate_Only), Region_Only = levels(res.plot.nelme$Region_Only), Response_Only = plot.type.use, Change = NA))
+df.null<- df.null %>%
+  left_join(., func.groups, by = "COMNAME")
+df<- rbind(df[,], df.null)
+df$duplicated<- paste(df$COMNAME, df$SEASON, df$Climate_Only, df$Functional.Group)
+df<- df[!duplicated(df$duplicated),] %>%
+  arrange(., COMNAME, SEASON)
+
+for(j in seq_along(levels(df$SEASON))){
+  dat.use<- df %>%
+    dplyr::filter(., SEASON == levels(df$SEASON)[j])
+  
+  dodge <- position_dodge(width = 1)
+  
+  dat.use.df<- dat.use %>%
+    tidyr::complete(COMNAME, SEASON)
+  dat.use.df$COMNAME<- str_to_title(dat.use.df$COMNAME)
+  dat.use.df$COMNAME<- factor(dat.use.df$COMNAME, levels = rev(unique(dat.use.df$COMNAME)))
+  
+  dat.use.df<- dat.use.df %>%
+    drop_na(Change)
+  #dat.use.df$Count<- ifelse(dat.use.df$Change == 0, 0, ifelse(dat.use.df$Change > 0, 2, -1))
+  #grouped.df<- dat.use.df %>%
+  #group_by(., COMNAME) %>%
+  #dplyr::summarize(., "Plot.Group" = sum(Count))
+  
+  # Join
+  #dat.use.df<- dat.use.df %>%
+  #left_join(., grouped.df, by = "COMNAME")
+  #dat.use.df$Plot.Group<- factor(dat.use.df$Plot.Group, levels = rev(c(-2, -1, 1, 0, 2, 4)))
+  #dat.use.df<- dat.use.df %>%
+  #arrange(., Plot.Group, COMNAME, SEASON)
+  dat.use.df$COMNAME.Plot<- factor(dat.use.df$COMNAME, levels = rev(unique(dat.use.df$COMNAME)), labels = rev(unique(to_sentence_case(as.character(dat.use.df$COMNAME)))))
+  dat.use.df$Scenario<- ifelse(dat.use.df$Climate_Only == "Cold", "Cold",
+                               ifelse(dat.use.df$Climate_Only == "Warm", "Warm", "Average"))
+  dat.use.df$Scenario<- factor(dat.use.df$Scenario, levels = c("Cold", "Average", "Warm"))
+  
+  plot.out<- ggplot(data = dat.use.df, aes(x = COMNAME.Plot, y = Change, color = Scenario)) + 
+    geom_hline(yintercept = 0, color = "#bdbdbd") +
+    geom_point(alpha = 0.7, size = 2.5) +
+    scale_color_manual("Climate Scenario", values = c("#3182bd", "#636363", "#de2d26")) +
+    ylab("Percent change in relative biomass") + 
+    xlab("Species") +
+    ylim(c(-100, 500)) +
+    theme_bw() +
+    theme(text = element_text(size = 12),
+          strip.background = element_blank(),
+          panel.border = element_rect(colour = "black")) +
+    coord_flip() +
+    facet_wrap(~Functional.Group, scales = "free_y") +
+    ggtitle(paste(names(res.plot.all)[1], levels(df$SEASON)[j], sep = " "))
+  
+  ggplot2::ggsave(filename = paste(out.dir, plot.type.use, names(res.plot.all)[1], levels(df$SEASON)[j], ".jpg", sep = ""), plot = plot.out, width = 11, height = 8, units = "in")
+}
+
+### Season, differences by region
+df<- data.frame(rbind(res.plot.all[[2]], res.plot.all[[3]]))
+df<- df %>%
+  filter(., as.character(Climate_Only) == "Mean" & as.character(Response_Only) == "Biomass")
+df$Region_Only<- factor(df$Region_Only, levels = c("South", "GOM"), labels = c("Southern New England/Mid Atlantic Bight", "Gulf of Maine"))
+df.null<- cbind(expand.grid(COMNAME = levels(df$COMNAME), SEASON = unique(df$SEASON), Climate_Only = unique(df$Climate_Only), Region_Only = levels(df$Region_Only), Response_Only = plot.type.use, Change = NA))
+df.null<- df.null %>%
+  left_join(., func.groups, by = "COMNAME")
+df<- rbind(df[,], df.null)
+df$duplicated<- paste(df$COMNAME, df$SEASON, df$Region_Only, df$Functional.Group)
+df<- df[!duplicated(df$duplicated),] %>%
+  arrange(., COMNAME, SEASON) 
+spp.keep<- df %>%
+  group_by(COMNAME) %>%
+  summarize_at(vars(Change), n_distinct, na.rm = T) %>%
+  filter(., Change == 4) %>%
+  dplyr::select(., COMNAME)
+df<- df %>%
+  filter(., as.character(COMNAME) %in% as.character(spp.keep$COMNAME))
+
+# One plot per season, regional differences
+seasons<- c("FALL", "SPRING")
+
+for(i in seq_along(seasons)){
+  dat.use<- df %>%
+    filter(., SEASON == seasons[i])
+  dodge <- position_dodge(width = 1)
+  
+  dat.use$COMNAME<- str_to_title(dat.use$COMNAME)
+  dat.use$COMNAME<- factor(dat.use$COMNAME, levels = rev(unique(dat.use$COMNAME)))
+  
+  dat.use.df<- dat.use %>%
+    drop_na(Change)
+  # dat.use.df$Count<- ifelse(dat.use.df$Change == 0, 0, ifelse(dat.use.df$Change > 0, 2, -1))
+  # grouped.df<- dat.use.df %>%
+  #   group_by(., COMNAME) %>%
+  #   dplyr::summarize(., "Plot.Group" = sum(Count))
+  
+  # Join
+  # dat.use.df<- dat.use.df %>%
+  #   left_join(., grouped.df, by = "COMNAME")
+  # dat.use.df$Plot.Group<- factor(dat.use.df$Plot.Group, levels = rev(c(-2, -1, 1, 0, 2, 4)))
+  # dat.use.df<- dat.use.df %>%
+  #   arrange(., Plot.Group, COMNAME, Region_Only)
+  dat.use.df$COMNAME.Plot<- factor(dat.use.df$COMNAME, levels = rev(unique(dat.use.df$COMNAME)), labels = rev(unique(to_sentence_case(as.character(dat.use.df$COMNAME)))))
+  
+  plot.means<- ggplot(data = dat.use.df, aes(x = COMNAME.Plot, y = Change, fill = Region_Only)) + 
+    geom_bar(stat = "identity", width = 0.6, position = position_dodge(width = 0.6)) +
+    scale_fill_manual(name = "Region", values  = c("#ff7f00", "#377eb8")) +
+    ylab("Percent change in relative biomass") + 
+    xlab("Species") +
+    geom_hline(yintercept = 0) +
+    theme_bw() +
+    theme(text = element_text(size = 12),
+          strip.background = element_blank(),
+          panel.border = element_rect(colour = "black")) +
+    coord_flip() +
+    facet_wrap(~Functional.Group, scales = "free_y") +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    ggtitle(paste(seasons[i], sep = " "))
+  
+  ggplot2::ggsave(filename = paste(out.dir, plot.type.use, seasons[i], ".jpg", sep = ""), plot = plot.means, width = 11, height = 8, units = "in")
+}
+
+## Other presence and biomass plots
+if(FALSE){
+  plot.types<- c("Presence", "Biomass")
+  
+  for(g in seq_along(plot.types)){
+    plot.type.use<- plot.types[g]
+    
+    res.plot<- res %>%
+      dplyr::filter(., Response_Only == plot.type.use)
+    
+    # Lets add a functional group column...
+    # Merge with functional groups....
+    func.groups<- read.csv("~/GitHub/COCA/Data/JHareSppFunctionalGroup.csv")
+    func.groups$COMNAME<- toupper(func.groups$COMNAME)
+    
+    res.plot<- res.plot %>%
+      left_join(., func.groups, by = "COMNAME")
+    res.plot<- res.plot[!is.na(res.plot$Functional.Group),]
+    res.plot$Functional.Group<- factor(res.plot$Functional.Group, levels = c("Groundfish", "Pelagic", "Coastal", "Invertebrates", "Diadromous", "Elasmobranch"))
+    res.plot<- res.plot %>%
+      dplyr::select(., -Region_Scenario, -Scenario_Only) %>%
+      dplyr::arrange(., COMNAME, Functional.Group, SEASON, Region_Only, Climate_Only, Change)
+    res.plot$COMNAME<- factor(res.plot$COMNAME, levels = unique(res.plot$COMNAME))
+    res.plot$SEASON<- factor(res.plot$SEASON, levels = c("FALL", "SPRING"))
+    res.plot$Climate_Only<- factor(res.plot$Climate_Only, levels = c("Mean", "Warm", "Cold"))
+    res.plot$Region_Only<- factor(res.plot$Region_Only, levels = c("NELME", "GOM", "South"))
+    
+    res.plot.nelme<- res.plot %>%
+      dplyr::filter(., Region_Only == "NELME")
+    res.plot.gom<- res.plot %>%
+      dplyr::filter(., Region_Only == "GOM")
+    res.plot.south<- res.plot %>%
+      dplyr::filter(., Region_Only == "South")
+    
+    res.plot.all<- list(res.plot.nelme, res.plot.gom, res.plot.south)
+    names(res.plot.all)<- c("NELME", "GoM", "South")
+    
+    for(i in seq_along(res.plot.all)){
+      df<- data.frame(res.plot.all[[i]])
+      df.null<- cbind(expand.grid(COMNAME = levels(res.plot.nelme$COMNAME), SEASON = unique(res.plot.nelme$SEASON), Climate_Only = unique(res.plot.nelme$Climate_Only), Region_Only = levels(res.plot.nelme$Region_Only), Response_Only = plot.type.use, Change = NA))
+      df.null<- df.null %>%
+        left_join(., func.groups, by = "COMNAME")
+      df<- rbind(df[,], df.null)
+      df$duplicated<- paste(df$COMNAME, df$SEASON, df$Climate_Only, df$Functional.Group)
+      df<- df[!duplicated(df$duplicated),] %>%
+        arrange(., COMNAME, SEASON)
+      
+      for(j in seq_along(levels(df$SEASON))){
+        dat.use<- df %>%
+          dplyr::filter(., SEASON == levels(df$SEASON)[j])
+        
+        dodge <- position_dodge(width = 1)
+        
+        dat.use.df<- dat.use %>%
+          tidyr::complete(COMNAME, SEASON)
+        dat.use.df$COMNAME<- str_to_title(dat.use.df$COMNAME)
+        dat.use.df$COMNAME<- factor(dat.use.df$COMNAME, levels = rev(unique(dat.use.df$COMNAME)))
+        
+        dat.use.df<- dat.use.df %>%
+          drop_na(Change)
+        dat.use.df$Count<- ifelse(dat.use.df$Change == 0, 0, ifelse(dat.use.df$Change > 0, 2, -1))
+        grouped.df<- dat.use.df %>%
+          group_by(., COMNAME) %>%
+          dplyr::summarize(., "Plot.Group" = sum(Count))
+        
+        # Join
+        dat.use.df<- dat.use.df %>%
+          left_join(., grouped.df, by = "COMNAME")
+        dat.use.df$Plot.Group<- factor(dat.use.df$Plot.Group, levels = rev(c(-2, -1, 1, 0, 2, 4)))
+        dat.use.df<- dat.use.df %>%
+          arrange(., Plot.Group, COMNAME, SEASON)
+        dat.use.df$COMNAME.Plot<- factor(dat.use.df$COMNAME, levels = unique(dat.use.df$COMNAME))
+        
+        means.df<- dat.use.df %>%
+          dplyr::filter(., Climate_Only == "Mean")
+        scenarios.df<- dat.use.df %>%
+          dplyr::filter(., Climate_Only != "Mean")
+        scenarios.df$Scenario<- ifelse(grepl("cold", scenarios.df$Climate_Only), "Cold", "Warm")
+        scenarios.df$Scenario<- factor(scenarios.df$Climate_Only, levels = c("Cold", "Warm"))
+        
+        plot.means<- ggplot(data = means.df, aes(COMNAME.Plot, Change)) + 
+          geom_bar(stat = "identity", width = 0.6, position = position_dodge(width = 0.6)) +
+          geom_hline(yintercept = 0) +
+          theme_bw() +
+          theme(text = element_text(size = 12)) +
+          coord_flip() +
+          facet_wrap(~Functional.Group, scales = "free") +
+          ggtitle(paste(names(res.plot.all)[i], levels(df$SEASON)[j], sep = " "))
+        
+        plot.error<- plot.means +
+          geom_point(data = scenarios.df, aes(COMNAME.Plot, Change, color = Scenario)) +
+          scale_color_manual("Climate Scenario", values = c("#3182bd", "#de2d26")) +
+          coord_flip() +
+          facet_wrap(~Functional.Group, scales = "free")
+        
+        ggplot2::ggsave(filename = paste(out.dir, plot.type.use, names(res.plot.all)[i], levels(df$SEASON)[j], ".jpg", sep = ""), plot = plot.error, width = 11, height = 8, units = "in")
+      }
+      
+      print(paste(plot.type.use, names(res.plot.all)[i], levels(df$SEASON)[j], "is done!", sep = " "))
+    }
+  }
+}
+
+
+
+# Results - SDM vs. NEVA comparison ---------------------------------------
+if(FALSE){
+  # Probably easiest if we keep the mod.res file consistent for cutting species. But, if we want to try something else, we could do that here:
+  out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
+  results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) # This should have everything we need. 
+  
+  # Let's get the model fit, too....
+  mod.results<- read.csv(paste(out.dir, "mod.results.csv", sep = ""))
+  dat.full<- results %>%
+    left_join(., mod.results, by = c("COMNAME", "SEASON")) %>%
+    dplyr::select(., -X)
+  dat.full$AUC.SDM[is.na(dat.full$AUC.SDM)]<- 0
+  
+  # Exploring cut offs... at least 5% deviance explained?
+  mod.spp.keep<- mod.results %>%
+    filter(., AUC >= 0.7) %>%
+    group_by(., COMNAME) %>%
+    summarize_at(vars(SEASON), n_distinct) %>%
+    filter(., SEASON == 2)
+  
+  dat.sub<- dat.full %>%
+    filter(., COMNAME %in% mod.spp.keep$COMNAME)
+}
+# Read in projections
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
+results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) # This should have everything we need. 
+
+# Filter species 
+dat.sub<- results %>%
+  filter(., COMNAME %in% mod.res$COMNAME)
+dat.full<- dat.sub
 
 # Functional groups
 func.groups<- read.csv("~/GitHub/COCA/Data/JHareSppFunctionalGroup.csv")
 func.groups$COMNAME<- toupper(func.groups$COMNAME)
 
-# Model fit stats and filter out models that had less than 0.7 or have low certainty according to expert assessment
-mod.results<- read.csv(paste(out.dir, "mod.results.csv", sep = "")) %>%
-  dplyr::select(., -X)
 dat.full<- dat.full %>%
-  left_join(., mod.results, by = c("COMNAME", "SEASON"))
-dat.full$AUC.SDM[is.na(dat.full$AUC.SDM)]<- 0
+  left_join(., func.groups)
 
-dat.sub<- dat.full %>%
-  filter(., AUC.SDM >= 0.70)
+# Jon Certainty Data
+jon.df<- read_csv("~/GitHub/COCA/Data/Jon_QualitativeResults.csv")
 
+# Filter to species with Moderate, High, Very high certainty
 cert.keep<- c("Moderate", "High", "Very high")
-dat.full<- dat.sub %>%
+dat.full<- dat.full %>%
   left_join(., jon.df, by = "COMNAME") %>%
   filter(., SENSITIVITY.CERTAINTY %in% cert.keep & DIRECTIONAL.EFFECT.CERTAINTY %in% cert.keep)
 
-# Calculating potential impact using baseline and future biomass data: PIa = baseline biomass - future biomass, PIr = baseline biomass - future biomass / sqrt(baseline biomass + future biomass), PI = PIa + PIr/2
+# The old way...
+if(FALSE) {
+  # Calculating potential impact using baseline and future biomass data: PIa = baseline biomass - future biomass, PIr = baseline biomass - future biomass / sqrt(baseline biomass + future biomass), PI = PIa + PIr/2
+  proj.class.keep<- c("Baseline.sdm.b", "Future_mean.sdm.b", "Future_warm.sdm.b", "Future_cold.sdm.b")
+  
+  ## Sensitivity
+  dat.sens<- dat.full %>%
+    filter(., Proj.Class %in% proj.class.keep) %>%
+    dplyr::select(., COMNAME, SEASON, Proj.Class, Projections) %>%
+    spread(., Proj.Class, Projections)
+  
+  pot_impact_func<- function(base, future, metric){
+    if(metric == "Actual"){
+      out<- data.frame("x" = base$x, "y" = base$y, "Actual_Impact" = base$Projection - future$Projection)
+      return(out)
+    }
+    
+    if(metric == "Relative"){
+      out<- data.frame("x" = base$x, "y" = base$y, "Relative_Impact" = (base$Projection - future$Projection)/sqrt(base$Projection + future$Projection))
+      return(out)
+    }
+    
+    if(metric == "Total"){
+      actual<- data.frame("x" = base$x, "y" = base$y, "Actual_Impact" = base$Projection - future$Projection)
+      relative<- data.frame("x" = base$x, "y" = base$y, "Relative_Impact" = (base$Projection - future$Projection)/sqrt(base$Projection + future$Projection))
+      out<- data.frame("x" = base$x, "y" = base$y, "Total_Impact" = (actual$Actual_Impact + relative$Relative_Impact)/2)
+      return(out)
+    }
+  }
+  
+  dat.sens<- dat.sens %>%
+    mutate(., "Mean.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
+           "Warm.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
+           "Cold.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
+           "Mean.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
+           "Warm.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
+           "Cold.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
+           "Mean.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)),
+           "Warm.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)),
+           "Cold.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)))
+  
+  dat.sens.keep<- dat.sens %>%
+    dplyr::select(., COMNAME, SEASON, Mean.Actual.Impact, Warm.Actual.Impact, Cold.Actual.Impact, Mean.Relative.Impact, Warm.Relative.Impact, Cold.Relative.Impact, Mean.Total.Impact, Warm.Total.Impact, Cold.Total.Impact) %>%
+    gather(., Impact.Scenario, Data, -COMNAME, -SEASON)
+  
+  # Now need averages for each species...
+  means_func<- function(df){
+    mean(df[,3], na.rm = T)
+  }
+  
+  dat.sens.keep<- dat.sens.keep %>%
+    mutate(., "Mean" = as.numeric(map(Data, possibly(means_func, NA))))
+  
+  # Add in Jon's sensitivity data...
+  sens.cert.keep<- c("Moderate", "High", "Very high")
+  dat.sens.keep<- dat.sens.keep %>%
+    left_join(., jon.df) %>%
+    dplyr::filter(., SENSITIVITY.CERTAINTY %in% sens.cert.keep)
+  
+  dat.sens.keep$SENSITIVITY<- factor(dat.sens.keep$SENSITIVITY, levels = c("Low", "Moderate", "High", "Very high"))
+  dat.sens.keep$SENSITIVITY.CERTAINTY<- factor(dat.sens.keep$SENSITIVITY.CERTAINTY, levels = c("Moderate", "High", "Very high"))
+  
+  # Plot....
+  dat.sens.avg<- dat.sens.keep %>%
+    group_by(., Impact.Scenario, SENSITIVITY) %>%
+    summarise_at(., "Mean", c("mean", "sd"), na.rm = T) %>%
+    drop_na(SENSITIVITY)
+  dat.sens.avg$Impact.Scenario<- factor(dat.sens.avg$Impact.Scenario, levels = c("Cold.Actual.Impact", "Mean.Actual.Impact", "Warm.Actual.Impact", "Cold.Relative.Impact", "Mean.Relative.Impact", "Warm.Relative.Impact", "Cold.Total.Impact", "Mean.Total.Impact", "Warm.Total.Impact"))
+  
+  plot.out.sens<- ggplot(data = dat.sens.avg, aes(x = SENSITIVITY, y = mean)) +
+    geom_point() + 
+    geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2,
+                  position=position_dodge(0.05)) +
+    ylab("SDM Potential Impact") +
+    xlab("NEVA Sensitivity Ranking") +
+    facet_wrap(~Impact.Scenario, nrow = 3, scales = "free_y") +
+    geom_smooth(data = dat.sens.avg, aes(x = as.numeric(SENSITIVITY), y = mean), method = "lm", se = FALSE) +
+    theme_bw() 
+  ggsave(paste(out.dir, "Sensitivity_vs_Impact.jpg", sep = ""), plot.out.sens, width = 11, height = 8, units = "in")
+  
+  ## Vulnerability
+  dat.vuln<- dat.full %>%
+    filter(., Proj.Class %in% proj.class.keep) %>%
+    dplyr::select(., COMNAME, SEASON, Proj.Class, Projections) %>%
+    spread(., Proj.Class, Projections)
+  
+  pot_impact_func<- function(base, future, metric){
+    if(metric == "Actual"){
+      out<- data.frame("x" = base$x, "y" = base$y, "Actual_Impact" = base$Projection - future$Projection)
+      return(out)
+    }
+    
+    if(metric == "Relative"){
+      out<- data.frame("x" = base$x, "y" = base$y, "Relative_Impact" = (base$Projection - future$Projection)/sqrt(base$Projection + future$Projection))
+      return(out)
+    }
+    
+    if(metric == "Total"){
+      actual<- data.frame("x" = base$x, "y" = base$y, "Actual_Impact" = base$Projection - future$Projection)
+      relative<- data.frame("x" = base$x, "y" = base$y, "Relative_Impact" = (base$Projection - future$Projection)/sqrt(base$Projection + future$Projection))
+      out<- data.frame("x" = base$x, "y" = base$y, "Total_Impact" = (actual$Actual_Impact + relative$Relative_Impact)/2)
+      return(out)
+    }
+  }
+  
+  dat.vuln<- dat.vuln %>%
+    mutate(., "Mean.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
+           "Warm.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
+           "Cold.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
+           "Mean.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
+           "Warm.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
+           "Cold.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
+           "Mean.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)),
+           "Warm.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)),
+           "Cold.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)))
+  
+  dat.vuln.keep<- dat.vuln %>%
+    dplyr::select(., COMNAME, SEASON, Mean.Actual.Impact, Warm.Actual.Impact, Cold.Actual.Impact, Mean.Relative.Impact, Warm.Relative.Impact, Cold.Relative.Impact, Mean.Total.Impact, Warm.Total.Impact, Cold.Total.Impact) %>%
+    gather(., Impact.Scenario, Data, -COMNAME, -SEASON)
+  
+  # Now need averages for each species...
+  means_func<- function(df){
+    mean(df[,3], na.rm = T)
+  }
+  
+  dat.vuln.keep<- dat.vuln.keep %>%
+    mutate(., "Mean" = as.numeric(map(Data, possibly(means_func, NA))))
+  
+  # Add in Jon's sensitivity data...
+  vuln.cert.keep<- c("Moderate", "High", "Very high")
+  dat.vuln.keep<- dat.vuln.keep %>%
+    left_join(., jon.df) %>%
+    dplyr::filter(., VULNERABILITY.CERTAINTY %in% vuln.cert.keep)
+  
+  dat.vuln.keep$VULNERABILITY<- factor(dat.vuln.keep$VULNERABILITY, levels = c("Low", "Moderate", "High", "Very high"))
+  dat.vuln.keep$VULNERABILITY.CERTAINTY<- factor(dat.vuln.keep$SENSITIVITY.CERTAINTY, levels = c("Moderate", "High", "Very high"))
+  
+  # Plot....
+  dat.vuln.avg<- dat.vuln.keep %>%
+    group_by(., Impact.Scenario, VULNERABILITY) %>%
+    summarise_at(., "Mean", c("mean", "sd"), na.rm = T) %>%
+    drop_na(VULNERABILITY)
+  dat.vuln.avg$Impact.Scenario<- factor(dat.vuln.avg$Impact.Scenario, levels = c("Cold.Actual.Impact", "Mean.Actual.Impact", "Warm.Actual.Impact", "Cold.Relative.Impact", "Mean.Relative.Impact", "Warm.Relative.Impact", "Cold.Total.Impact", "Mean.Total.Impact", "Warm.Total.Impact"))
+  
+  plot.out.vuln<- ggplot(data = dat.vuln.avg, aes(x = VULNERABILITY, y = mean)) +
+    geom_point() + 
+    geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2,
+                  position=position_dodge(0.05)) +
+    ylab("SDM Potential Impact") +
+    xlab("NEVA Vulnerability Ranking") +
+    facet_wrap(~Impact.Scenario, nrow = 3, scales = "free_y") +
+    geom_smooth(data = dat.vuln.avg, aes(x = as.numeric(VULNERABILITY), y = mean), method = "lm", se = FALSE) +
+    theme_bw() 
+  ggsave(paste(out.dir, "Vulnerability_vs_Impact.jpg", sep = ""), plot.out.vuln, width = 11, height = 8, units = "in")
+}
+
+# New: Crossman et al. 2012. A scalar sensitivity weight measuring the ratio of change in species distribution relative to the extent of a species distribution in the future. 
 proj.class.keep<- c("Baseline.sdm.b", "Future_mean.sdm.b", "Future_warm.sdm.b", "Future_cold.sdm.b")
 
 ## Sensitivity
@@ -1218,47 +2568,22 @@ dat.sens<- dat.full %>%
   dplyr::select(., COMNAME, SEASON, Proj.Class, Projections) %>%
   spread(., Proj.Class, Projections)
 
-pot_impact_func<- function(base, future, metric){
-  if(metric == "Actual"){
-    out<- data.frame("x" = base$x, "y" = base$y, "Actual_Impact" = base$Projection - future$Projection)
-    return(out)
-  }
-  
-  if(metric == "Relative"){
-    out<- data.frame("x" = base$x, "y" = base$y, "Relative_Impact" = (base$Projection - future$Projection)/sqrt(base$Projection + future$Projection))
-    return(out)
-  }
-  
-  if(metric == "Total"){
-    actual<- data.frame("x" = base$x, "y" = base$y, "Actual_Impact" = base$Projection - future$Projection)
-    relative<- data.frame("x" = base$x, "y" = base$y, "Relative_Impact" = (base$Projection - future$Projection)/sqrt(base$Projection + future$Projection))
-    out<- data.frame("x" = base$x, "y" = base$y, "Total_Impact" = (actual$Actual_Impact + relative$Relative_Impact)/2)
-    return(out)
-  }
+sens_weight_func<- function(base, future){
+  # Get individual cell absolutel changes in species distribution
+  absdiff.df<- data.frame("x" = base$x, "y" = base$y, "AbsChange" = abs(base$Projection - future$Projection))
+  ext<- sum(future$Projection, na.rm = TRUE)
+  weight<- (sum(absdiff.df$AbsChange, na.rm = TRUE))/ext
+  return(as.numeric(weight))
 }
 
 dat.sens<- dat.sens %>%
-  mutate(., "Mean.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
-         "Warm.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
-         "Cold.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
-         "Mean.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
-         "Warm.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
-         "Cold.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
-         "Mean.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)),
-         "Warm.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)),
-         "Cold.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)))
+  mutate(., "Mean.SensitivityWeight" = as.numeric(pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b), possibly(sens_weight_func, NA))),
+         "Warm.SensitivityWeight" = as.numeric(pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b), possibly(sens_weight_func, NA))),
+         "Cold.SensitivityWeight" = as.numeric(pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b), possibly(sens_weight_func, NA))))
 
 dat.sens.keep<- dat.sens %>%
-  dplyr::select(., COMNAME, SEASON, Mean.Actual.Impact, Warm.Actual.Impact, Cold.Actual.Impact, Mean.Relative.Impact, Warm.Relative.Impact, Cold.Relative.Impact, Mean.Total.Impact, Warm.Total.Impact, Cold.Total.Impact) %>%
+  dplyr::select(., COMNAME, SEASON, Mean.SensitivityWeight, Warm.SensitivityWeight, Cold.SensitivityWeight) %>%
   gather(., Impact.Scenario, Data, -COMNAME, -SEASON)
-
-# Now need averages for each species...
-means_func<- function(df){
-  mean(df[,3], na.rm = T)
-}
-
-dat.sens.keep<- dat.sens.keep %>%
-  mutate(., "Mean" = as.numeric(map(Data, possibly(means_func, NA))))
 
 # Add in Jon's sensitivity data...
 sens.cert.keep<- c("Moderate", "High", "Very high")
@@ -1270,11 +2595,23 @@ dat.sens.keep$SENSITIVITY<- factor(dat.sens.keep$SENSITIVITY, levels = c("Low", 
 dat.sens.keep$SENSITIVITY.CERTAINTY<- factor(dat.sens.keep$SENSITIVITY.CERTAINTY, levels = c("Moderate", "High", "Very high"))
 
 # Plot....
+# First, slight change so that "Infinte" snesitivity weights, which means there is NO habitat left, receive the highest sensitivity weight
+temp<- which(is.infinite(unlist(dat.sens.keep$Data)))
+stats<- dat.sens.keep %>%
+  filter(., !is.infinite(Data)) %>%
+  group_by(SEASON, Impact.Scenario) %>%
+  summarize(.,
+            "SD" = sd(Data, na.rm = TRUE),
+            "Max" = max(Data, na.rm = TRUE))
+
+dat.sens.keep$Data[temp]<- 158+35.5
+
+# Add standard deviation?
 dat.sens.avg<- dat.sens.keep %>%
   group_by(., Impact.Scenario, SENSITIVITY) %>%
-  summarise_at(., "Mean", c("mean", "sd"), na.rm = T) %>%
+  summarise_at(., "Data", c("mean", "sd"), na.rm = T) %>%
   drop_na(SENSITIVITY)
-dat.sens.avg$Impact.Scenario<- factor(dat.sens.avg$Impact.Scenario, levels = c("Cold.Actual.Impact", "Mean.Actual.Impact", "Warm.Actual.Impact", "Cold.Relative.Impact", "Mean.Relative.Impact", "Warm.Relative.Impact", "Cold.Total.Impact", "Mean.Total.Impact", "Warm.Total.Impact"))
+dat.sens.avg$Impact.Scenario<- factor(dat.sens.avg$Impact.Scenario, levels = c("Cold.SensitivityWeight", "Mean.SensitivityWeight", "Warm.SensitivityWeight"))
 
 plot.out.sens<- ggplot(data = dat.sens.avg, aes(x = SENSITIVITY, y = mean)) +
   geom_point() + 
@@ -1286,81 +2623,6 @@ plot.out.sens<- ggplot(data = dat.sens.avg, aes(x = SENSITIVITY, y = mean)) +
   geom_smooth(data = dat.sens.avg, aes(x = as.numeric(SENSITIVITY), y = mean), method = "lm", se = FALSE) +
   theme_bw() 
 ggsave(paste(out.dir, "Sensitivity_vs_Impact.jpg", sep = ""), plot.out.sens, width = 11, height = 8, units = "in")
-
-## Vulnerability
-dat.vuln<- dat.full %>%
-  filter(., Proj.Class %in% proj.class.keep) %>%
-  dplyr::select(., COMNAME, SEASON, Proj.Class, Projections) %>%
-  spread(., Proj.Class, Projections)
-
-pot_impact_func<- function(base, future, metric){
-  if(metric == "Actual"){
-    out<- data.frame("x" = base$x, "y" = base$y, "Actual_Impact" = base$Projection - future$Projection)
-    return(out)
-  }
-  
-  if(metric == "Relative"){
-    out<- data.frame("x" = base$x, "y" = base$y, "Relative_Impact" = (base$Projection - future$Projection)/sqrt(base$Projection + future$Projection))
-    return(out)
-  }
-  
-  if(metric == "Total"){
-    actual<- data.frame("x" = base$x, "y" = base$y, "Actual_Impact" = base$Projection - future$Projection)
-    relative<- data.frame("x" = base$x, "y" = base$y, "Relative_Impact" = (base$Projection - future$Projection)/sqrt(base$Projection + future$Projection))
-    out<- data.frame("x" = base$x, "y" = base$y, "Total_Impact" = (actual$Actual_Impact + relative$Relative_Impact)/2)
-    return(out)
-  }
-}
-
-dat.vuln<- dat.vuln %>%
-  mutate(., "Mean.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
-         "Warm.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
-         "Cold.Actual.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Actual")), possibly(pot_impact_func, NA)),
-         "Mean.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
-         "Warm.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
-         "Cold.Relative.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Relative")), possibly(pot_impact_func, NA)),
-         "Mean.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_mean.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)),
-         "Warm.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_warm.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)),
-         "Cold.Total.Impact" = pmap(list(base = Baseline.sdm.b, future = Future_cold.sdm.b, metric = list("Total")), possibly(pot_impact_func, NA)))
-
-dat.vuln.keep<- dat.vuln %>%
-  dplyr::select(., COMNAME, SEASON, Mean.Actual.Impact, Warm.Actual.Impact, Cold.Actual.Impact, Mean.Relative.Impact, Warm.Relative.Impact, Cold.Relative.Impact, Mean.Total.Impact, Warm.Total.Impact, Cold.Total.Impact) %>%
-  gather(., Impact.Scenario, Data, -COMNAME, -SEASON)
-
-# Now need averages for each species...
-means_func<- function(df){
-  mean(df[,3], na.rm = T)
-}
-
-dat.vuln.keep<- dat.vuln.keep %>%
-  mutate(., "Mean" = as.numeric(map(Data, possibly(means_func, NA))))
-
-# Add in Jon's sensitivity data...
-vuln.cert.keep<- c("Moderate", "High", "Very high")
-dat.vuln.keep<- dat.vuln.keep %>%
-  left_join(., jon.df) %>%
-  dplyr::filter(., VULNERABILITY.CERTAINTY %in% vuln.cert.keep)
-
-dat.vuln.keep$VULNERABILITY<- factor(dat.vuln.keep$VULNERABILITY, levels = c("Low", "Moderate", "High", "Very high"))
-dat.vuln.keep$VULNERABILITY.CERTAINTY<- factor(dat.vuln.keep$SENSITIVITY.CERTAINTY, levels = c("Moderate", "High", "Very high"))
-
-# Plot....
-dat.vuln.avg<- dat.vuln.keep %>%
-  group_by(., Impact.Scenario, VULNERABILITY) %>%
-  summarise_at(., "Mean", c("mean", "sd"), na.rm = T) %>%
-  drop_na(VULNERABILITY)
-dat.vuln.avg$Impact.Scenario<- factor(dat.vuln.avg$Impact.Scenario, levels = c("Cold.Actual.Impact", "Mean.Actual.Impact", "Warm.Actual.Impact", "Cold.Relative.Impact", "Mean.Relative.Impact", "Warm.Relative.Impact", "Cold.Total.Impact", "Mean.Total.Impact", "Warm.Total.Impact"))
-
-plot.out.vuln<- ggplot(data = dat.vuln.avg, aes(x = VULNERABILITY, y = mean)) +
-  geom_point() + 
-  geom_errorbar(aes(ymin=mean-sd, ymax=mean+sd), width=.2,
-                position=position_dodge(0.05)) +
-  ylab("SDM Potential Impact") +
-  xlab("NEVA Vulnerability Ranking") +
-  facet_wrap(~Impact.Scenario, nrow = 3, scales = "free_y") +
-  geom_smooth(data = dat.vuln.avg, aes(x = as.numeric(VULNERABILITY), y = mean), method = "lm", se = FALSE) +
-  theme_bw() 
-ggsave(paste(out.dir, "Vulnerability_vs_Impact.jpg", sep = ""), plot.out.vuln, width = 11, height = 8, units = "in")
 
 ## Directional effect -- could look at this both on raw change as well as percent change. Everything we need should be in the dat.full object
 dat.dir<- dat.full %>%
@@ -1375,7 +2637,7 @@ dir_eff_func<- function(base, future, scale){
   
   if(scale == "Percent")
     base.adj<- ifelse(base$Projection == 0, 0.0001, base$Projection)
-    diff<- data.frame("x" = base$x, "y" = base$y, "Perc.Diff" = (100*((future$Projection - base.adj)/base.adj)))
+  diff<- data.frame("x" = base$x, "y" = base$y, "Perc.Diff" = (100*((future$Projection - base.adj)/base.adj)))
   return(diff)
 }
 
@@ -1452,7 +2714,7 @@ for(i in seq_along(dir.cuts)){
   dat.dir.comp.count<- dat.dir.comp %>%
     drop_na(., DIRECTIONAL.EFFECT, Binned) %>%
     group_by(., Match) %>%
-    summarize(., "Count" = n()) %>%
+    dplyr::summarize(., "Count" = n()) %>%
     mutate(., "Percent" = round(100*(Count/sum(Count)), 2)) %>%
     separate(Match, c("DIRECTIONAL.EFFECT", "Binned"), sep = "_")
   dat.dir.comp.count$Title<- paste(dat.dir.comp.count$Count, "\n", "(", dat.dir.comp.count$Percent, ")", sep = "")
@@ -1464,7 +2726,7 @@ for(i in seq_along(dir.cuts)){
     geom_tile(data = dat.dir.comp.tile, aes(x = DIRECTIONAL.EFFECT, y = Binned), fill = NA, color = "black") +
     xlab("NEVA Directional Effect") +
     ylab("SDM Directional Effect")
-      
+  
   dat.dir.labels<- dat.dir.comp %>%
     drop_na(., DIRECTIONAL.EFFECT, Binned) %>%
     left_join(., func.groups)
@@ -1481,52 +2743,261 @@ for(i in seq_along(dir.cuts)){
   ggsave(paste(out.dir, dir.cuts.use[2], "to", dir.cuts.use[3], "DirectionaEffectMatching.jpg", sep = ""), dat.dir.comp.plot2, width = 11, height = 8, units = "in")
 }
 
-# Vulnerability...
-dat.vuln.comp<- dat.vuln.keep %>%
-  dplyr::filter(., Impact.Scenario == "Mean.Total.Impact") %>%
+# Sensitivity...
+dat.sens.comp<- dat.sens.keep %>%
+  dplyr::filter(., Impact.Scenario == "Mean.SensitivityWeight") %>%
   group_by(., COMNAME, Impact.Scenario, SENSITIVITY, SENSITIVITY.CERTAINTY, VULNERABILITY, VULNERABILITY.CERTAINTY, DIRECTIONAL.EFFECT, DIRECTIONAL.EFFECT.CERTAINTY) %>%
-  summarize_at(., "Mean", mean, na.rm = T)
-vuln.quants<- quantile(dat.vuln.comp$Mean)
-dat.vuln.comp$Binned<- cut(dat.vuln.comp$Mean, breaks = vuln.quants, labels = c("Low", "Moderate", "High", "Very high"))
-dat.vuln.comp$Binned<- factor(dat.vuln.comp$Binned, levels = c("Low", "Moderate", "High", "Very high"))
-dat.vuln.comp$VULNERABILITY<- factor(dat.vuln.comp$VULNERABILITY, levels = c("Low", "Moderate", "High", "Very high"))
-dat.vuln.comp$Match<- paste(dat.vuln.comp$VULNERABILITY, dat.vuln.comp$Binned, sep = "_")
+  summarize_at(., "Data", mean, na.rm = T)
+sens.quants<- quantile(dat.sens.comp$Data, na.rm = TRUE)
+dat.sens.comp$Binned<- cut(dat.sens.comp$Data, breaks = sens.quants, labels = c("Low", "Moderate", "High", "Very high"))
+dat.sens.comp$Binned<- factor(dat.sens.comp$Binned, levels = c("Low", "Moderate", "High", "Very high"))
+dat.sens.comp$SENSITIVITY<- factor(dat.sens.comp$SENSITIVITY, levels = c("Low", "Moderate", "High", "Very high"))
+dat.sens.comp$Match<- paste(dat.sens.comp$SENSITIVITY, dat.sens.comp$Binned, sep = "_")
 
-dat.vuln.comp.count<- dat.vuln.comp %>%
-  drop_na(., VULNERABILITY, Binned) %>%
+dat.sens.comp.count<- dat.sens.comp %>%
+  drop_na(., SENSITIVITY, Binned) %>%
   group_by(., Match) %>%
-  summarize(., "Count" = n()) %>%
+  dplyr::summarize(., "Count" = n()) %>%
   mutate(., "Percent" = round(100*(Count/sum(Count)), 2)) %>%
-  separate(Match, c("VULNERABILITY", "Binned"), sep = "_")
-dat.vuln.comp.count$Title<- paste(dat.vuln.comp.count$Count, "\n", "(", dat.vuln.comp.count$Percent, ")", sep = "")
-dat.vuln.comp.count$VULNERABILITY<- factor(dat.vuln.comp.count$VULNERABILITY, levels = c("Low", "Moderate", "High", "Very high"))
-dat.vuln.comp.count$Binned<- factor(dat.vuln.comp.count$Binned, levels = c("Low", "Moderate", "High", "Very high"))
+  separate(Match, c("SENSITIVITY", "Binned"), sep = "_")
+dat.sens.comp.count$Title<- paste(dat.sens.comp.count$Count, "\n", "(", dat.sens.comp.count$Percent, ")", sep = "")
+dat.sens.comp.count$SENSITIVITY<- factor(dat.sens.comp.count$SENSITIVITY, levels = c("Low", "Moderate", "High", "Very high"))
+dat.sens.comp.count$Binned<- factor(dat.sens.comp.count$Binned, levels = c("Low", "Moderate", "High", "Very high"))
 
-dat.vuln.comp.tile<- data.frame("VULNERABILITY" = c("Low", "Moderate", "High", "Very high"), "Binned" = c("Low", "Moderate", "High", "Very high"))
-dat.vuln.comp.tile$VULNERABILITY<- factor(dat.vuln.comp.tile$VULNERABILITY, levels = c("Low", "Moderate", "High", "Very high"))
-dat.vuln.comp.tile$Binned<- factor(dat.vuln.comp.tile$Binned, levels = c("Low", "Moderate", "High", "Very high"))
+dat.sens.comp.tile<- data.frame("SENSITIVITY" = c("Low", "Moderate", "High", "Very high"), "Binned" = c("Low", "Moderate", "High", "Very high"))
+dat.sens.comp.tile$SENSITIVITY<- factor(dat.sens.comp.tile$SENSITIVITY, levels = c("Low", "Moderate", "High", "Very high"))
+dat.sens.comp.tile$Binned<- factor(dat.sens.comp.tile$Binned, levels = c("Low", "Moderate", "High", "Very high"))
 
-dat.vuln.comp.plot<- ggplot() +
-  geom_text(data = dat.vuln.comp.count, aes(x = VULNERABILITY, y = Binned, label = Title), fontface = "bold") +
-  geom_tile(data = dat.vuln.comp.tile, aes(x = VULNERABILITY, y = Binned), fill = NA, color = "black") +
-  xlab("NEVA Vulnerability") +
-  ylab("SDM Vulnerability")
+dat.sens.comp.plot<- ggplot() +
+  geom_tile(data = dat.sens.comp.tile, aes(x = SENSITIVITY, y = Binned), fill = NA, color = "black") +
+  geom_text(data = dat.sens.comp.count, aes(x = SENSITIVITY, y = Binned, label = Title), fontface = "bold") +
+  xlab("NEVA Sensitivity") +
+  ylab("SDM Sensitivity")
 
-dat.vuln.labels<- dat.vuln.comp %>%
-  drop_na(., VULNERABILITY, Binned) %>%
+dat.sens.labels<- dat.sens.comp %>%
+  drop_na(., SENSITIVITY, Binned) %>%
   left_join(., func.groups)
 
-dat.vuln.labels$Functional.Group<- factor(dat.vuln.labels$Functional.Group, levels = c("Groundfish", "Pelagic", "Coastal", "Invertebrates", "Diadromous", "Elasmobranch"))
+dat.sens.labels$Functional.Group<- factor(dat.sens.labels$Functional.Group, levels = c("Groundfish", "Pelagic", "Coastal", "Invertebrates", "Diadromous", "Elasmobranch"))
 
-dat.vuln.comp.plot2<- dat.vuln.comp.plot +
-  geom_text_repel(data = dat.vuln.labels, aes(x = VULNERABILITY, y = Binned, label = toTitleCase(tolower(COMNAME)), color = Functional.Group), size = 3, segment.color = NA, nudge_y = -0.3) +
-  geom_point(data = dat.vuln.labels, aes(x = VULNERABILITY, y = Binned, color = Functional.Group), alpha = 0.00001) +
+dat.sens.comp.plot2<- dat.sens.comp.plot +
+  geom_text_repel(data = dat.sens.labels, aes(x = SENSITIVITY, y = Binned, label = toTitleCase(tolower(COMNAME)), color = Functional.Group), size = 3, segment.color = NA, nudge_y = -0.25) +
+  geom_point(data = dat.sens.labels, aes(x = SENSITIVITY, y = Binned, color = Functional.Group), alpha = 0.00001) +
   scale_color_manual(name = "Functional Group", values = c('#1b9e77','#d95f02','#7570b3','#e7298a','#66a61e','#e6ab02')) +
   guides(color = guide_legend(override.aes = list(size = 3, color = c('#1b9e77','#d95f02','#7570b3','#e7298a','#66a61e','#e6ab02'), alpha = 1)))
-ggsave(paste(out.dir, "VulnerabilityMatching.jpg", sep = ""), dat.vuln.comp.plot2, width = 11, height = 8, units = "in")
+ggsave(paste(out.dir, "SensitivityMatching.jpg", sep = ""), dat.sens.comp.plot2, width = 12, height = 9, units = "in")
 
 ### Random Forest model to test match vs. mismatching
-# Qualitative data
+# Old
+if(FALSE){
+  # Qualitative data
+  dir.eff.dat<- read.csv("./Data/JHareDirectionalEffect.csv")
+  qual.dat<- read.csv("./Data/JHareQualitativeDataResults.csv")
+  
+  # Need to get one directional effect for each species and one rank for each species attribute for sensitivity and exposure...
+  # Wide to long format
+  qual.dat.l<- gather(qual.dat, "Score", "Votes", Low, Moderate, High, Very.High)
+  qual.dat.l<- arrange(qual.dat.l, Species, Functional.Group, Attribute, Score)
+  
+  qual.dat.l$Score<- factor(qual.dat.l$Score, levels = c("Low", "Moderate", "High", "Very.High"))
+  qual.dat.l$Score.Numeric<- as.numeric(qual.dat.l$Score)
+  
+  # Calculate weighted mean by species-attribute-attribute.category, then characterize these into low, moderate, high and very high. This will allow us to count them and apply the logic rule used by Hare et al.
+  qual.dat.wt.mean<- qual.dat.l %>%
+    group_by(., Species, Attribute, Attribute.Category) %>%
+    dplyr::summarise("Weighted.Mean" = weighted.mean(Score.Numeric, Votes)) %>%
+    dplyr::mutate(., "Logic.Rule" = cut(Weighted.Mean, breaks = c(0, 2.5, 3.0, 3.5, 100), labels = c("Low", "Moderate", "High", "Very.High")))
+  
+  # Now need to get to overall vulnerability...
+  # Get the counts (number of votes in each species - attribute category - vulneraibity) to apply logic rule
+  dat.scores<- qual.dat.wt.mean %>%
+    group_by(., Species, Attribute.Category, Logic.Rule) %>%
+    dplyr::summarise("Number" = n()) %>%
+    data.frame(.)
+  
+  # Apply logic rule to translate number of votes to a low-moderatre-high-very high rank for each species - attribute category
+  spp.ranks.split<- dat.scores %>%
+    dplyr::mutate(Rank.Temp = as.numeric(ifelse(Logic.Rule == "Very.High" & Number >= 3, 4, 
+                                                ifelse(Logic.Rule == "High" | Logic.Rule == "Very.High" & Number >= 2, 3, 
+                                                       ifelse(Logic.Rule == "High" | Logic.Rule == "Very.High" | Logic.Rule == "Moderate" & Number >= 2, 2, 1))))) %>%
+    dplyr::group_by(., Species, Attribute.Category) %>%
+    dplyr::summarise(Rank = max(Rank.Temp)) 
+  
+  # Calculate one overall vulnerability rank for each species, which is exposure factor rank * sensitivity attribute rank (ranges 1-16)
+  spp.ranks.overall<- spp.ranks.split %>%
+    spread(., Attribute.Category, Rank) %>% 
+    dplyr::group_by(., Species) %>%
+    dplyr::summarise(Overall.Rank = Exposure.Factor*Sensitivity.Attribute) %>% 
+    dplyr::mutate(., "Overall.Rank.Code" = cut(Overall.Rank, breaks = c(0, 3, 6, 9, 16), labels = c("Low", "Moderate", "High", "Very.High")))
+  
+  # Directional effect
+  dir.eff.dat.l<- gather(dir.eff.dat, "Score", "Votes", Negative, Neutral, Positive)
+  dir.eff.dat.l<- arrange(dir.eff.dat.l, Species, Functional.Group, Score)
+  
+  # Convert directional effect to number
+  dir.eff.dat.l$Score.Numeric<- ifelse(dir.eff.dat.l$Score == "Negative", -1,
+                                       ifelse(dir.eff.dat.l$Score == "Neutral", 0, 1))
+  
+  # Calculate weighted mean by species, then characterize these into negative. neutral, positive. 
+  dir.eff.dat.wt.mean<- dir.eff.dat.l %>%
+    group_by(., Species) %>%
+    dplyr::summarise("Weighted.Mean" = weighted.mean(Score.Numeric, Votes)) %>%
+    dplyr::mutate(., "Directional.Effect" = cut(Weighted.Mean, breaks = c(-100, -0.333, 0.333, 100), labels = c("Negative", "Neutral", "Positive")))
+  
+  # Okay...now what? Let's add in the response columns, which is the SDM and NEVA rank to each of the qual.dat.wt.mean and dir.eff.dat.wt.mean dataframes
+  qual.dat.wt.mean$Attribute.Full<- paste(qual.dat.wt.mean$Attribute.Category, "_", qual.dat.wt.mean$Attribute, sep = "")
+  qual.dat.mv<- qual.dat.wt.mean %>%
+    ungroup() %>%
+    dplyr::select(., -Weighted.Mean, -Attribute, -Attribute.Category) %>%
+    spread(., Attribute.Full, Logic.Rule) 
+  qual.dat.mv$COMNAME<- toupper(as.character(qual.dat.mv$Species))
+  
+  # Overall vulnerability....
+  dat.vuln.mv<- dat.vuln.comp %>%
+    dplyr::select(., COMNAME, Match)
+  
+  dat.vuln.mv$Match.Factor<- ifelse(dat.vuln.mv$Match == "Low_Low" | dat.vuln.mv$Match == "Moderate_Moderate"| dat.vuln.mv$Match == "High_High" | dat.vuln.mv$Match == "Very high_Very high", "Match",
+                                    ifelse(dat.vuln.mv$Match == "Moderate_Low" | dat.vuln.mv$Match == "High_Moderate" | dat.vuln.mv$Match == "Very high_High", "Miss One NEVA", 
+                                           ifelse(dat.vuln.mv$Match == "Low_Moderate" |  dat.vuln.mv$Match == "Moderate_High" |  dat.vuln.mv$Match == "High_Very high", "Miss One SDM",
+                                                  ifelse(dat.vuln.mv$Match == "High_Low" | dat.vuln.mv$Match == "Very high_Moderate", "Miss Two NEVA",
+                                                         ifelse(dat.vuln.mv$Match == "Low_High" | dat.vuln.mv$Match == "Moderate_Very high", "Miss Two SDM",
+                                                                ifelse(dat.vuln.mv$Match == "Very high_Low", "Miss Three NEVA",
+                                                                       ifelse(dat.vuln.mv$Match == "Low_Very high", "Miss Three SDM", NA)))))))
+  
+  dat.vuln.mv$Match.Factor<- factor(dat.vuln.mv$Match.Factor, levels = c("Match", "Miss One NEVA", "Miss One SDM", "Miss Two NEVA", "Miss Two SDM", "Miss Three NEVA", "Miss Three SDM"))
+  dat.vuln.mv$Match.Group<- ifelse(grepl("NEVA", dat.vuln.mv$Match.Factor), "NEVA",
+                                   ifelse(grepl("SDM", dat.vuln.mv$Match.Factor), "SDM", "None"))
+  dat.vuln.mv$Match.Group<- factor(dat.vuln.mv$Match.Group, levels = c("None", "SDM", "NEVA"))
+  dat.vuln.mv$Match.LevelOnly<- str_replace_all(dat.vuln.mv$Match.Factor, c(" NEVA" = "", " SDM" = ""))
+  dat.vuln.mv$Match.LevelOnly<- factor(dat.vuln.mv$Match.LevelOnly, levels = c("Match", "Miss One", "Miss Two", "Miss Three"))
+  
+  # Add in attributes...
+  dat.vuln.mod<- dat.vuln.mv %>%
+    left_join(., qual.dat.mv, by = "COMNAME") %>%
+    drop_na(Match.Factor, Match.LevelOnly)
+  
+  dat.vuln.mod<- data.frame(dat.vuln.mod[,c(7, 8:11, 25:36)])
+  
+  # Can't have any 0 obs for response classes...
+  summary(dat.vuln.mod)
+  dat.vuln.mod<- droplevels(dat.vuln.mod)
+  
+  dat.mod.full<- data.frame(dat.vuln.mod[,c(5:17)])
+  
+  rf.f<- randomForest(Match.LevelOnly ~ ., data = dat.mod.full, importance = TRUE)
+  rf.f
+  varImpPlot(rf.f)
+  
+  # Not great, reduce down to just matching vs. mismatching
+  dat.vuln.mod$Match.LevelRed<- ifelse(grepl("Miss", dat.vuln.mod$Match.LevelOnly) & grepl("SDM", dat.vuln.mod$Match.Group), "Miss SDM", 
+                                       ifelse(grepl("Miss", dat.vuln.mod$Match.LevelOnly) & grepl("NEVA", dat.vuln.mod$Match.Group), "Miss NEVA", "Match"))
+  dat.vuln.mod$Match.LevelRed<- factor(dat.vuln.mod$Match.LevelRed, levels = c("Match", "Miss SDM", "Miss NEVA"))
+  
+  dat.mod.LevelRed<- dat.vuln.mod[,c(18, 6:17)]
+  rf.f.red<- randomForest(Match.LevelRed ~ ., data = dat.mod.LevelRed, importance = TRUE)
+  rf.f.red
+  varImpPlot(rf.f.red)
+  
+  # Also horrible...just match vs. mismatch?
+  dat.vuln.mod$Match.Bin<- ifelse(grepl("Miss", dat.vuln.mod$Match.Factor), "Miss", "Match")
+  dat.vuln.mod$Match.Bin<- factor(dat.vuln.mod$Match.Bin, levels = c("Miss", "Match"))
+  dat.mod.bin<- data.frame(dat.vuln.mod[,c(19, 6:17)])
+  rf.f.bin<- randomForest(Match.Bin ~ ., data = dat.mod.bin, importance = TRUE)
+  rf.f.bin
+  varImpPlot(rf.f.bin)
+  
+  # Partial variable importance
+  adult.mob<- partialPlot(rf.f.bin, dat.mod.bin, Sensitivity.Attribute_Adult.Mobility, "Miss")
+  spawn.cycle<- partialPlot(rf.f.bin, dat.mod.bin, Sensitivity.Attribute_Spawning.Cycle, "Miss")
+  stock.size<- partialPlot(rf.f.bin, dat.mod.bin, Sensitivity.Attribute_Stock.Size.Status, "Miss")
+  
+  part.df<- data.frame("Category" = c(rep("Adult.Mobility", 4), rep("Spawn.Cycle", 3), rep("Stock.Size", 4)), "Rank" = c(adult.mob[[1]], spawn.cycle[[1]], stock.size[[1]]), "Probability" = c(adult.mob[[2]], spawn.cycle[[2]], stock.size[[2]]))
+  part.df<- part.df %>%
+    complete(., Category, Rank)
+  part.df$Rank<- factor(part.df$Rank, levels = c("Low", "Moderate", "High", "Very.High"))
+  part.df$Probability<- ifelse(part.df$Probability > 1, 1, part.df$Probability)
+  
+  part.plot<- ggplot() +
+    geom_bar(data = part.df, aes(x = Rank, y = Probability, fill = Category), stat = "identity", position = "dodge") +
+    scale_fill_manual(name = "Trait/Factor", values = c('#e41a1c','#377eb8','#4daf4a')) +
+    ylab("Marginal probability of being classified as a 'Miss'") +
+    xlab("NEVA Sensitivity")
+  ggsave(paste(out.dir, "RFPartImpPlot.jpg", sep = ""), part.plot, width = 11, height = 8)
+  
+  
+  
+  
+  # Nicer plot...
+  var.imp<- data.frame(rf.f.bin$importance)
+  var.imp<- data.frame("Attribute" = gsub("Sensitivity.Attribute_", "", rownames(var.imp)), "Mean Decrease Accuracy" = var.imp$MeanDecreaseAccuracy, "Mean Decrease Gini" = var.imp$MeanDecreaseGini)
+  var.imp.l<- var.imp %>%
+    gather(., "Metric", "Value", -Attribute)
+  var.imp.sd<- data.frame(rf.f.bin$importanceSD)
+  var.imp.sd<- data.frame("Attribute" = gsub("Sensitivity.Attribute_", "", rownames(var.imp.sd)), "SD Accuracy" = var.imp.sd$MeanDecreaseAccuracy)
+  
+  var.imp.acc<- var.imp.l %>%
+    filter(., Metric == "Mean.Decrease.Accuracy") %>%
+    left_join(., var.imp.sd) %>%
+    dplyr::arrange(Value)
+  
+  var.imp.acc$Attribute<- factor(var.imp.acc$Attribute, levels = var.imp.acc$Attribute)
+  
+  plot.imp.sd<- ggplot(var.imp.acc, aes(x = Value, y = Attribute)) + 
+    geom_point() +
+    geom_errorbarh(aes(y = Attribute, xmin=Value-SD.Accuracy, xmax=Value+SD.Accuracy), width=.2) 
+  
+  var.imp.gini<- var.imp.l %>%
+    group_by(., Metric) %>%
+    mutate_if(., is.numeric, scale)
+  
+  var.imp.scaled<- var.imp.gini %>%
+    filter(., Metric == "Mean.Decrease.Accuracy") %>%
+    dplyr::arrange(Value)
+  var.imp.scaled$Attribute<- factor(var.imp.scaled$Attribute, levels = var.imp.scaled$Attribute)
+  
+  plot.imp.scaled<- ggplot(var.imp.scaled, aes(Value, Attribute)) +
+    geom_segment(aes(x = 0, y = Attribute, xend = Value, yend = Attribute), color = "grey50") +
+    geom_point() +
+    geom_vline(xintercept = 0) +
+    xlab("Scaled mean decrease in accuracy")
+  
+  var.gini.scaled<- var.imp.gini %>%
+    filter(., Metric == "Mean.Decrease.Gini") %>%
+    dplyr::arrange(Value)
+  var.gini.scaled$Attribute<- factor(var.gini.scaled$Attribute, levels = var.gini.scaled$Attribute)
+  
+  plot.gini.scaled<- ggplot(var.gini.scaled, aes(Value, Attribute)) +
+    geom_segment(aes(x = 0, y = Attribute, xend = Value, yend = Attribute), color = "grey50") +
+    geom_point() +
+    geom_vline(xintercept = 0) +
+    xlab("Scaled mean decrease in Gini index")
+  
+  rf.f.bin.out<- plot_grid(plot.imp.scaled, plot.gini.scaled, nrow = 1)
+  ggsave(paste(out.dir, "RFVarImp_Sensitivity.jpg", sep = ""), rf.f.bin.out, width = 18, height = 8)
+  
+  plot.imp.scaled.vuln<- plot.imp.scaled
+}
+## Random forest for sensitivity
+dat.sens.mv<- dat.sens.comp %>%
+  ungroup() %>%
+  dplyr::select(., COMNAME, Match)
+
+dat.sens.mv$Match.Factor<- ifelse(dat.sens.mv$Match == "Low_Low" | dat.sens.mv$Match == "Moderate_Moderate"| dat.sens.mv$Match == "High_High" | dat.sens.mv$Match == "Very high_Very high", "Match",
+                                  ifelse(dat.sens.mv$Match == "Moderate_Low" | dat.sens.mv$Match == "High_Moderate" | dat.sens.mv$Match == "Very high_High", "Miss One NEVA", 
+                                         ifelse(dat.sens.mv$Match == "Low_Moderate" |  dat.sens.mv$Match == "Moderate_High" |  dat.sens.mv$Match == "High_Very high", "Miss One SDM",
+                                                ifelse(dat.sens.mv$Match == "High_Low" | dat.sens.mv$Match == "Very high_Moderate", "Miss Two NEVA",
+                                                       ifelse(dat.sens.mv$Match == "Low_High" | dat.sens.mv$Match == "Moderate_Very high", "Miss Two SDM",
+                                                              ifelse(dat.sens.mv$Match == "Very high_Low", "Miss Three NEVA",
+                                                                     ifelse(dat.sens.mv$Match == "Low_Very high", "Miss Three SDM", NA)))))))
+
+dat.sens.mv$Match.Factor<- factor(dat.sens.mv$Match.Factor, levels = c("Match", "Miss One NEVA", "Miss One SDM", "Miss Two NEVA", "Miss Two SDM", "Miss Three NEVA", "Miss Three SDM"))
+dat.sens.mv$Match.Group<- ifelse(grepl("NEVA", dat.sens.mv$Match.Factor), "NEVA",
+                                 ifelse(grepl("SDM", dat.sens.mv$Match.Factor), "SDM", "None"))
+dat.sens.mv$Match.Group<- factor(dat.sens.mv$Match.Group, levels = c("None", "SDM", "NEVA"))
+dat.sens.mv$Match.LevelOnly<- str_replace_all(dat.sens.mv$Match.Factor, c(" NEVA" = "", " SDM" = ""))
+dat.sens.mv$Match.LevelOnly<- factor(dat.sens.mv$Match.LevelOnly, levels = c("Match", "Miss One", "Miss Two", "Miss Three"))
+
+# Add in attributes...
 dir.eff.dat<- read.csv("./Data/JHareDirectionalEffect.csv")
 qual.dat<- read.csv("./Data/JHareQualitativeDataResults.csv")
 
@@ -1572,7 +3043,7 @@ dir.eff.dat.l<- arrange(dir.eff.dat.l, Species, Functional.Group, Score)
 
 # Convert directional effect to number
 dir.eff.dat.l$Score.Numeric<- ifelse(dir.eff.dat.l$Score == "Negative", -1,
-                                    ifelse(dir.eff.dat.l$Score == "Neutral", 0, 1))
+                                     ifelse(dir.eff.dat.l$Score == "Neutral", 0, 1))
 
 # Calculate weighted mean by species, then characterize these into negative. neutral, positive. 
 dir.eff.dat.wt.mean<- dir.eff.dat.l %>%
@@ -1588,66 +3059,33 @@ qual.dat.mv<- qual.dat.wt.mean %>%
   spread(., Attribute.Full, Logic.Rule) 
 qual.dat.mv$COMNAME<- toupper(as.character(qual.dat.mv$Species))
 
-# Overall vulnerability....
-dat.vuln.mv<- dat.vuln.comp %>%
-  dplyr::select(., COMNAME, Match)
-
-dat.vuln.mv$Match.Factor<- ifelse(dat.vuln.mv$Match == "Low_Low" | dat.vuln.mv$Match == "Moderate_Moderate"| dat.vuln.mv$Match == "High_High" | dat.vuln.mv$Match == "Very high_Very high", "Match",
-                                  ifelse(dat.vuln.mv$Match == "Moderate_Low" | dat.vuln.mv$Match == "High_Moderate" | dat.vuln.mv$Match == "Very high_High", "Miss One NEVA", 
-                                         ifelse(dat.vuln.mv$Match == "Low_Moderate" |  dat.vuln.mv$Match == "Moderate_High" |  dat.vuln.mv$Match == "High_Very high", "Miss One SDM",
-                                                ifelse(dat.vuln.mv$Match == "High_Low" | dat.vuln.mv$Match == "Very high_Moderate", "Miss Two NEVA",
-                                                       ifelse(dat.vuln.mv$Match == "Low_High" | dat.vuln.mv$Match == "Moderate_Very high", "Miss Two SDM",
-                                                              ifelse(dat.vuln.mv$Match == "Very high_Low", "Miss Three NEVA",
-                                                                     ifelse(dat.vuln.mv$Match == "Low_Very high", "Miss Three SDM", NA)))))))
-
-dat.vuln.mv$Match.Factor<- factor(dat.vuln.mv$Match.Factor, levels = c("Match", "Miss One NEVA", "Miss One SDM", "Miss Two NEVA", "Miss Two SDM", "Miss Three NEVA", "Miss Three SDM"))
-dat.vuln.mv$Match.Group<- ifelse(grepl("NEVA", dat.vuln.mv$Match.Factor), "NEVA",
-                                 ifelse(grepl("SDM", dat.vuln.mv$Match.Factor), "SDM", "None"))
-dat.vuln.mv$Match.Group<- factor(dat.vuln.mv$Match.Group, levels = c("None", "SDM", "NEVA"))
-dat.vuln.mv$Match.LevelOnly<- str_replace_all(dat.vuln.mv$Match.Factor, c(" NEVA" = "", " SDM" = ""))
-dat.vuln.mv$Match.LevelOnly<- factor(dat.vuln.mv$Match.LevelOnly, levels = c("Match", "Miss One", "Miss Two", "Miss Three"))
-
-# Add in attributes...
-dat.vuln.mod<- dat.vuln.mv %>%
+dat.sens.mod<- dat.sens.mv %>%
   left_join(., qual.dat.mv, by = "COMNAME") %>%
   drop_na(Match.Factor, Match.LevelOnly)
-  
-dat.vuln.mod<- data.frame(dat.vuln.mod[,c(7, 8:11, 25:36)])
+
+dat.sens.mod<- data.frame(dat.sens.mod[,c(5, 19:30)])
 
 # Can't have any 0 obs for response classes...
-summary(dat.vuln.mod)
-dat.vuln.mod<- droplevels(dat.vuln.mod)
-
-dat.mod.full<- data.frame(dat.vuln.mod[,c(5:17)])
+dat.mod.full<- data.frame(dat.sens.mod[,])
 
 rf.f<- randomForest(Match.LevelOnly ~ ., data = dat.mod.full, importance = TRUE)
 rf.f
 varImpPlot(rf.f)
 
 # Not great, reduce down to just matching vs. mismatching
-dat.vuln.mod$Match.LevelRed<- ifelse(grepl("Miss", dat.vuln.mod$Match.LevelOnly) & grepl("SDM", dat.vuln.mod$Match.Group), "Miss SDM", 
-                                  ifelse(grepl("Miss", dat.vuln.mod$Match.LevelOnly) & grepl("NEVA", dat.vuln.mod$Match.Group), "Miss NEVA", "Match"))
-dat.vuln.mod$Match.LevelRed<- factor(dat.vuln.mod$Match.LevelRed, levels = c("Match", "Miss SDM", "Miss NEVA"))
+dat.sens.mod$Match.LevelRed<- ifelse(grepl("Miss", dat.sens.mod$Match.LevelOnly), "Miss", "Match")
+dat.sens.mod$Match.LevelRed<- factor(dat.sens.mod$Match.LevelRed, levels = c("Match", "Miss"))
 
-dat.mod.LevelRed<- dat.vuln.mod[,c(18, 6:17)]
+dat.mod.LevelRed<- dat.sens.mod[,c(14, 2:13)]
 rf.f.red<- randomForest(Match.LevelRed ~ ., data = dat.mod.LevelRed, importance = TRUE)
 rf.f.red
 varImpPlot(rf.f.red)
 
-# Also horrible...just match vs. mismatch?
-dat.vuln.mod$Match.Bin<- ifelse(grepl("Miss", dat.vuln.mod$Match.Factor), "Miss", "Match")
-dat.vuln.mod$Match.Bin<- factor(dat.vuln.mod$Match.Bin, levels = c("Miss", "Match"))
-dat.mod.bin<- data.frame(dat.vuln.mod[,c(19, 6:17)])
-rf.f.bin<- randomForest(Match.Bin ~ ., data = dat.mod.bin, importance = TRUE)
-rf.f.bin
-varImpPlot(rf.f.bin)
-
 # Partial variable importance
-adult.mob<- partialPlot(rf.f.bin, dat.mod.bin, Sensitivity.Attribute_Adult.Mobility, "Miss")
-spawn.cycle<- partialPlot(rf.f.bin, dat.mod.bin, Sensitivity.Attribute_Spawning.Cycle, "Miss")
-stock.size<- partialPlot(rf.f.bin, dat.mod.bin, Sensitivity.Attribute_Stock.Size.Status, "Miss")
+pop.gr<- partialPlot(rf.f.red, dat.mod.LevelRed, Sensitivity.Attribute_Population.Growth.Rate, "Miss")
+adult.mob<- partialPlot(rf.f.red, dat.mod.LevelRed, Sensitivity.Attribute_Adult.Mobility, "Miss")
 
-part.df<- data.frame("Category" = c(rep("Adult.Mobility", 4), rep("Spawn.Cycle", 3), rep("Stock.Size", 4)), "Rank" = c(adult.mob[[1]], spawn.cycle[[1]], stock.size[[1]]), "Probability" = c(adult.mob[[2]], spawn.cycle[[2]], stock.size[[2]]))
+part.df<- data.frame("Category" = c(rep("Population.Growth.Rate", 4), rep("Adult.Mobility", 4)), "Rank" = c(pop.gr[[1]], adult.mob[[1]]), "Probability" = c(pop.gr[[2]], adult.mob[[2]]))
 part.df<- part.df %>%
   complete(., Category, Rank)
 part.df$Rank<- factor(part.df$Rank, levels = c("Low", "Moderate", "High", "Very.High"))
@@ -1655,77 +3093,25 @@ part.df$Probability<- ifelse(part.df$Probability > 1, 1, part.df$Probability)
 
 part.plot<- ggplot() +
   geom_bar(data = part.df, aes(x = Rank, y = Probability, fill = Category), stat = "identity", position = "dodge") +
-  scale_fill_manual(name = "Trait/Factor", values = c('#e41a1c','#377eb8','#4daf4a')) +
+  scale_fill_manual(name = "Trait/Factor", values = c('#e41a1c','#377eb8')) +
   ylab("Marginal probability of being classified as a 'Miss'") +
   xlab("NEVA Sensitivity")
 ggsave(paste(out.dir, "RFPartImpPlot.jpg", sep = ""), part.plot, width = 11, height = 8)
 
-
-
-
-# Nicer plot...
-var.imp<- data.frame(rf.f.bin$importance)
-var.imp<- data.frame("Attribute" = gsub("Sensitivity.Attribute_", "", rownames(var.imp)), "Mean Decrease Accuracy" = var.imp$MeanDecreaseAccuracy, "Mean Decrease Gini" = var.imp$MeanDecreaseGini)
-var.imp.l<- var.imp %>%
-  gather(., "Metric", "Value", -Attribute)
-var.imp.sd<- data.frame(rf.f.bin$importanceSD)
-var.imp.sd<- data.frame("Attribute" = gsub("Sensitivity.Attribute_", "", rownames(var.imp.sd)), "SD Accuracy" = var.imp.sd$MeanDecreaseAccuracy)
-
-var.imp.acc<- var.imp.l %>%
-  filter(., Metric == "Mean.Decrease.Accuracy") %>%
-  left_join(., var.imp.sd) %>%
-  dplyr::arrange(Value)
-
-var.imp.acc$Attribute<- factor(var.imp.acc$Attribute, levels = var.imp.acc$Attribute)
-
-plot.imp.sd<- ggplot(var.imp.acc, aes(x = Value, y = Attribute)) + 
-  geom_point() +
-  geom_errorbarh(aes(y = Attribute, xmin=Value-SD.Accuracy, xmax=Value+SD.Accuracy), width=.2) 
-
-var.imp.gini<- var.imp.l %>%
-  group_by(., Metric) %>%
-  mutate_if(., is.numeric, scale)
-
-var.imp.scaled<- var.imp.gini %>%
-  filter(., Metric == "Mean.Decrease.Accuracy") %>%
-  dplyr::arrange(Value)
-var.imp.scaled$Attribute<- factor(var.imp.scaled$Attribute, levels = var.imp.scaled$Attribute)
-
-plot.imp.scaled<- ggplot(var.imp.scaled, aes(Value, Attribute)) +
-  geom_segment(aes(x = 0, y = Attribute, xend = Value, yend = Attribute), color = "grey50") +
-  geom_point() +
-  geom_vline(xintercept = 0) +
-  xlab("Scaled mean decrease in accuracy")
-
-var.gini.scaled<- var.imp.gini %>%
-  filter(., Metric == "Mean.Decrease.Gini") %>%
-  dplyr::arrange(Value)
-var.gini.scaled$Attribute<- factor(var.gini.scaled$Attribute, levels = var.gini.scaled$Attribute)
-
-plot.gini.scaled<- ggplot(var.gini.scaled, aes(Value, Attribute)) +
-  geom_segment(aes(x = 0, y = Attribute, xend = Value, yend = Attribute), color = "grey50") +
-  geom_point() +
-  geom_vline(xintercept = 0) +
-  xlab("Scaled mean decrease in Gini index")
-
-rf.f.bin.out<- plot_grid(plot.imp.scaled, plot.gini.scaled, nrow = 1)
-ggsave(paste(out.dir, "RFVarImp_Sensitivity.jpg", sep = ""), rf.f.bin.out, width = 18, height = 8)
-
-plot.imp.scaled.vuln<- plot.imp.scaled
 
 ## Random forest for directional effect...
 dat.dir.mv<- dat.dir.comp %>%
   dplyr::select(., COMNAME, Match)
 
 dat.dir.mv$Match.Factor<- ifelse(dat.dir.mv$Match == "Negative_Negative" | dat.dir.mv$Match == "Neutral_Neutral"| dat.dir.mv$Match == "Positive_Positivie", "Match",
-                                  ifelse(dat.dir.mv$Match == "Negative_Neutral" | dat.dir.mv$Match == "Positive_Neutral", "Miss One NEVA", 
-                                         ifelse(dat.dir.mv$Match == "Neutral_Negative" |  dat.vuln.mv$Match == "Neutral_Positive", "Miss One SDM",
-                                                ifelse(dat.dir.mv$Match == "Positive_Negative", "Miss Two NEVA",
-                                                       ifelse(dat.dir.mv$Match == "Negative_Positive", "Miss Two SDM", NA)))))
+                                 ifelse(dat.dir.mv$Match == "Negative_Neutral" | dat.dir.mv$Match == "Positive_Neutral", "Miss One NEVA", 
+                                        ifelse(dat.dir.mv$Match == "Neutral_Negative" |  dat.dir.mv$Match == "Neutral_Positive", "Miss One SDM",
+                                               ifelse(dat.dir.mv$Match == "Positive_Negative", "Miss Two NEVA",
+                                                      ifelse(dat.dir.mv$Match == "Negative_Positive", "Miss Two SDM", NA)))))
 
 dat.dir.mv$Match.Factor<- factor(dat.dir.mv$Match.Factor, levels = c("Match", "Miss One NEVA", "Miss One SDM", "Miss Two NEVA", "Miss Two SDM"))
 dat.dir.mv$Match.Group<- ifelse(grepl("NEVA", dat.dir.mv$Match.Factor), "NEVA",
-                                 ifelse(grepl("SDM", dat.dir.mv$Match.Factor), "SDM", "None"))
+                                ifelse(grepl("SDM", dat.dir.mv$Match.Factor), "SDM", "None"))
 dat.dir.mv$Match.Group<- factor(dat.dir.mv$Match.Group, levels = c("None", "SDM", "NEVA"))
 dat.dir.mv$Match.LevelOnly<- str_replace_all(dat.dir.mv$Match.Factor, c(" NEVA" = "", " SDM" = ""))
 dat.dir.mv$Match.LevelOnly<- factor(dat.dir.mv$Match.LevelOnly, levels = c("Match", "Miss One", "Miss Two"))
@@ -1747,75 +3133,15 @@ rf.f
 varImpPlot(rf.f)
 
 # Not great, reduce down to just matching vs. mismatching
-dat.dir.mod$Match.LevelRed<- ifelse(grepl("Miss", dat.dir.mod$Match.LevelOnly) & grepl("SDM", dat.dir.mod$Match.Group), "Miss SDM", 
-                                     ifelse(grepl("Miss", dat.dir.mod$Match.LevelOnly) & grepl("NEVA", dat.dir.mod$Match.Group), "Miss NEVA", "Match"))
-dat.dir.mod$Match.LevelRed<- factor(dat.dir.mod$Match.LevelRed, levels = c("Match", "Miss SDM", "Miss NEVA"))
+dat.dir.mod$Match.LevelRed<- ifelse(grepl("Miss", dat.dir.mod$Match.LevelOnly), "Miss", "Match") 
+dat.dir.mod$Match.LevelRed<- factor(dat.dir.mod$Match.LevelRed, levels = c("Match", "Miss"))
 
-dat.mod.LevelRed<- dat.dir.mod[,c(17, 5:16)]
+dat.mod.LevelRed<- data.frame(dat.dir.mod[,c(32, 20:31)])
 rf.f.red<- randomForest(Match.LevelRed ~ ., data = dat.mod.LevelRed, importance = TRUE)
 rf.f.red
 varImpPlot(rf.f.red)
 
-# Also horrible...just match vs. mismatch?
-dat.dir.mod$Match.Bin<- ifelse(grepl("Miss", dat.dir.mod$Match.Factor), "Miss", "Match")
-dat.dir.mod$Match.Bin<- factor(dat.dir.mod$Match.Bin, levels = c("Miss", "Match"))
-dat.mod.bin<- data.frame(dat.dir.mod[,c(18, 5:16)])
-rf.f.bin<- randomForest(Match.Bin ~ ., data = dat.mod.bin, importance = TRUE)
-rf.f.bin
-varImpPlot(rf.f.bin)
 
-# Nicer plot...
-var.imp<- data.frame(rf.f.bin$importance)
-var.imp<- data.frame("Attribute" = gsub("Sensitivity.Attribute_", "", rownames(var.imp)), "Mean Decrease Accuracy" = var.imp$MeanDecreaseAccuracy, "Mean Decrease Gini" = var.imp$MeanDecreaseGini)
-var.imp.l<- var.imp %>%
-  gather(., "Metric", "Value", -Attribute)
-var.imp.sd<- data.frame(rf.f.bin$importanceSD)
-var.imp.sd<- data.frame("Attribute" = gsub("Sensitivity.Attribute_", "", rownames(var.imp.sd)), "SD Accuracy" = var.imp.sd$MeanDecreaseAccuracy)
-
-var.imp.acc<- var.imp.l %>%
-  filter(., Metric == "Mean.Decrease.Accuracy") %>%
-  left_join(., var.imp.sd) %>%
-  dplyr::arrange(Value)
-
-var.imp.acc$Attribute<- factor(var.imp.acc$Attribute, levels = var.imp.acc$Attribute)
-
-plot.imp.sd<- ggplot(var.imp.acc, aes(x = Value, y = Attribute)) + 
-  geom_point() +
-  geom_errorbarh(aes(y = Attribute, xmin=Value-SD.Accuracy, xmax=Value+SD.Accuracy), width=.2) 
-
-var.imp.gini<- var.imp.l %>%
-  group_by(., Metric) %>%
-  mutate_if(., is.numeric, scale)
-
-var.imp.scaled<- var.imp.gini %>%
-  filter(., Metric == "Mean.Decrease.Accuracy") %>%
-  dplyr::arrange(Value)
-var.imp.scaled$Attribute<- factor(var.imp.scaled$Attribute, levels = var.imp.scaled$Attribute)
-
-plot.imp.scaled<- ggplot(var.imp.scaled, aes(Value, Attribute)) +
-  geom_segment(aes(x = 0, y = Attribute, xend = Value, yend = Attribute), color = "grey50") +
-  geom_point() +
-  geom_vline(xintercept = 0) +
-  xlab("Scaled mean decrease in accuracy")
-
-var.gini.scaled<- var.imp.gini %>%
-  filter(., Metric == "Mean.Decrease.Gini") %>%
-  dplyr::arrange(Value)
-var.gini.scaled$Attribute<- factor(var.gini.scaled$Attribute, levels = var.gini.scaled$Attribute)
-
-plot.gini.scaled<- ggplot(var.gini.scaled, aes(Value, Attribute)) +
-  geom_segment(aes(x = 0, y = Attribute, xend = Value, yend = Attribute), color = "grey50") +
-  geom_point() +
-  geom_vline(xintercept = 0) +
-  xlab("Scaled mean decrease in Gini index")
-
-rf.f.bin.out<- plot_grid(plot.imp.scaled, plot.gini.scaled, nrow = 1)
-ggsave(paste(out.dir, "RFVarImp_DirEff.jpg", sep = ""), rf.f.bin.out, width = 18, height = 8)
-
-plot.imp.scaled.dir<- plot.imp.scaled
-
-rf.bin.out<- plot_grid(plot.imp.scaled.vuln, plot.imp.scaled.dir, labels = c("A. Random forest model factor/trait importance\nfor classifying species vulnerability match/mismatch", "B. Random forest model factor/trait importance\nfor classifying species directional effect match/mismatch"), scale = c(0.85, 0.85))
-ggsave(paste(out.dir, "RFVarImp_Both.jpg", sep = ""), rf.bin.out, width = 20, height = 10)
 
 ## Random forest searching.....
 # Establish a list of possible values for mtry, nodesize and sampsize
@@ -1834,10 +3160,10 @@ for(i in 1:nrow(hyper.grid)) {
   
   # Train a Random Forest model
   model<- randomForest(formula = Match.Bin ~ ., 
-                        data = dat.mod.f,
-                        mtry = hyper.grid$mtry[i],
-                        nodesize = hyper.grid$nodesize[i],
-                        sampsize = hyper.grid$sampsize[i])
+                       data = dat.mod.f,
+                       mtry = hyper.grid$mtry[i],
+                       nodesize = hyper.grid$nodesize[i],
+                       sampsize = hyper.grid$sampsize[i])
   
   # Store OOB error for the model                      
   oob_err[i]<- model$err.rate[nrow(model$err.rate), "OOB"]
@@ -1853,10 +3179,23 @@ print(hyper.grid[opt_i,])
 
 
 
+# Results — Combo vs. SDM predictive ability to baseline ------------------
+# Calculate difference in key statistics between the two models
+mod.diffs<- mod.res %>%
+  group_by(COMNAME, SEASON) %>%
+  summarize(., 
+            "CorrCoeff.Diff" = CorrCoeff.NEVA.B - CorrCoeff.SDM.B,
+            "Bias.Diff" = Bias.NEVA.B - Bias.SDM.B,
+            "RMSE.Diff" = RMSE.NEVA.B - RMSE.SDM.B) %>%
+  left_join(., func.groups) %>%
+  group_by(Functional.Group) %>%
+  summarize(., 
+            "MeanCorrCoeff.Diff" = mean(CorrCoeff.Diff), 
+            "MeanBias.Diff" = mean(Bias.Diff),
+            "MeanRMSE.Diff" = mean(RMSE.Diff))
 
-######
-## SDM+NEVA vs. SDM plotting of prediction intervals?
-######
+# Results — Combo vs. SDM prediction intervals ----------------------------
+## The overall idea here is to see if NEVA models improve the predictions (accuracy or uncertainty)
 rmse_func<- function(predicted, test.data) {
   if(all(test.data$BIOMASS == 0)){
     return(NA)
@@ -1868,15 +3207,15 @@ rmse_func<- function(predicted, test.data) {
 # Going to need access to the likelihood, prior and posterior information. This should be all in the mcmc results file for each species...
 res.files<- list.files(out.dir, "mcmc_")
 
-# Results
-neva.vs.sdm<- data.frame("COMNAME" = rep(NA, length(res.files)), "SEASON" = rep(NA, length(res.files)), "NEVA.RMSE.mu" = rep(NA, length(res.files)), "NEVA.RMSE.sd" = rep(NA, length(res.files)), "SDM.RMSE.mu" = rep(NA, length(res.files)), "SDM.RMSE.sd" = rep(NA, length(res.files)))
+# Results empty storage file
+neva.vs.sdm<- data.frame("COMNAME" = rep(NA, length(res.files)), "SEASON" = rep(NA, length(res.files)), "SDM.SD.mu" = rep(NA, length(res.files)), "NEVA.SD.mu" = rep(NA, length(res.files)), "NEVA.RMSE.mu" = rep(NA, length(res.files)), "NEVA.RMSE.sd" = rep(NA, length(res.files)), "SDM.RMSE.mu" = rep(NA, length(res.files)), "SDM.RMSE.sd" = rep(NA, length(res.files)))
 
-# Model results -- should really only be thinking about this for "good" models? AUC greater than 0.7?
-auc.res<- read_csv(paste(out.dir, "mod.results.csv", sep = ""))
-
+# Loop over each file -- species season model fit information
 for(i in seq_along(res.files)){
   
-  # Model fit -- presence and biomass
+  print(res.files[i])
+  
+  # SDM Model fit -- presence and biomass
   gam.p.temp<- readRDS(paste(out.dir, gsub("mcmc_", "gamfitpres", res.files[i]), sep = ""))
   gam.b.temp<- readRDS(paste(out.dir, gsub("mcmc_", "gamfitbio", res.files[i]), sep = ""))
   ilink<- family(gam.b.temp)$linkinv
@@ -1891,105 +3230,120 @@ for(i in seq_along(res.files)){
   likes.temp$NEVA.Rank<- order(likes.temp$Posterior)
   
   # Need to make predictions from each of these iterations
+  # Getting model coefficients for each of the candidate models
   mods.temp<- data.frame(read_rds(paste(out.dir, res.files[i], sep = ""))[[2]])
   colnames(mods.temp)<- gam.coef
   
-  # Predictions
+  # Determining species-season which will then be used to get the testing data to validate predictions
   spp.match<- toupper(strsplit(gsub(".rds", "", gsub("mcmc_", "", res.files[i])), "_")[[1]][1])
   season.match<- toupper(strsplit(gsub(".rds", "", gsub("mcmc_", "", res.files[i])), "_")[[1]][2])
   col.check<- paste(spp.match, season.match, sep = ".")
   
-  # Keep going?
-  auc.temp<- auc.res$AUC.SDM[paste(auc.res$COMNAME, auc.res$SEASON, sep = ".") == col.check] 
-  print(auc.temp)
-  
-  if(auc.temp >= 0.7){
-    test.data<- dat.full %>%
-      filter(., COMNAME == spp.match & SEASON == season.match) %>%
-      dplyr::select(TEST.DATA) %>%
-      unnest() %>%
-      data.frame()
-    temp<- dplyr::select(test.data, one_of(c("DEPTH.Scale", "SEASONALMU.OISST.Scale", "BIOMASS")))
-    test.data<- data.frame(na.omit(temp))
-    
-    # Presence component -- doesn't change
-    pred.p<- predict.gam(gam.p.temp, newdata = test.data, type = "response")
-    
-    # Prediction storage
-    preds.out<- data.frame("Pt" = seq(from = 1, nrow(test.data)), "Pred" = rep(NA, nrow(test.data)))
-    
-    for(j in 1:nrow(mods.temp)){
-      fit.mat<- matrix(as.numeric(mods.temp[j,]), nrow = 1, ncol = length(mods.temp[j,]), byrow = T, dimnames = list(NULL, gam.coef))
-      
-      # Make predictions with these values
-      lpmat.pred<- predict.gam(gam.b.temp, newdata = test.data, type = "lpmatrix")
-      preds.out[,j+1]<- as.numeric(exp(ilink(as.numeric(lpmat.pred %*% t(fit.mat))))*pred.p)
-      names(preds.out)[j+1]<- paste("Iteration.", j, sep = "")
-    }
-    
-    # Get the SDM predictions...
-    sdm.best<- likes.temp[likes.temp$SDM.Rank<= 900, ]
-    sdm.best<- sdm.best[order(sdm.best$SDM.Rank), ]
-    sdm.preds.best<- preds.out[,sdm.best$Iteration+1] %>%
-      gather(., "Iteration", "Prediction") %>%
-      separate(., Iteration, c("Remove", "Iteration")) %>%
-      dplyr::select(., -Remove) %>%
-      group_by(Iteration) %>%
-      nest(., .key = "Pred")
-    
-    # Get the NEVA predictions
-    neva.best<- likes.temp[likes.temp$NEVA.Rank<= 900, ]
-    neva.best<- neva.best[order(neva.best$NEVA.Rank), ]
-    neva.preds.best<- preds.out[,neva.best$Iteration+1] %>%
-      gather(., "Iteration", "Prediction") %>%
-      separate(., Iteration, c("Remove", "Iteration")) %>%
-      dplyr::select(., -Remove) %>%
-      group_by(Iteration) %>%
-      nest(., .key = "Pred") 
-    
-    # Calculate the AUC and Calibration values
-    test.data<- dat.full %>%
-      filter(., COMNAME == spp.match & SEASON == season.match) %>%
-      dplyr::select(TEST.DATA) %>%
-      unnest() %>%
-      data.frame()
-    temp<- dplyr::select(test.data, one_of(c("BIOMASS", "DEPTH.Scale", "SEASONALMU.OISST.Scale")))
-    test.data<- data.frame(na.omit(temp))
-    
-    sdm.summary<- sdm.preds.best %>%
-      mutate(., "RMSE" = map2(Pred, list(test.data), possibly(rmse_func, NA))) %>%
-      dplyr::select(., Iteration, RMSE) %>%
-      unnest() %>%
-      summarize_at(., vars("RMSE"), funs(mean, sd), na.rm = T)
-    
-    neva.summary<- neva.preds.best %>%
-      mutate(., "RMSE" = map2(Pred, list(test.data), possibly(rmse_func, NA))) %>%
-      dplyr::select(., Iteration, RMSE) %>%
-      unnest() %>%
-      summarize_at(., vars("RMSE"), funs(mean, sd), na.rm = T)
-    
+  if(grepl("sturgeon", res.files[i])){
     neva.vs.sdm$COMNAME[i]<- spp.match
     neva.vs.sdm$SEASON[i]<- season.match
-    neva.vs.sdm$NEVA.RMSE.mu[i]<- neva.summary$mean
-    neva.vs.sdm$NEVA.RMSE.sd[i]<- neva.summary$sd
-    neva.vs.sdm$SDM.RMSE.mu[i]<- sdm.summary$mean
-    neva.vs.sdm$SDM.RMSE.sd[i]<- sdm.summary$sd
-  } else {
-    print(paste(season, spp.match, "doesn't pass auc.check", sep = " "))
-    neva.vs.sdm$COMNAME[i]<- spp.match
-    neva.vs.sdm$SEASON[i]<- season.match
+    neva.vs.sdm$SDM.SD.mu[i]<- NA
+    neva.vs.sdm$NEVA.SD.mu[i]<- NA
     neva.vs.sdm$NEVA.RMSE.mu[i]<- NA
     neva.vs.sdm$NEVA.RMSE.sd[i]<- NA
     neva.vs.sdm$SDM.RMSE.mu[i]<- NA
     neva.vs.sdm$SDM.RMSE.sd[i]<- NA
+    next()
   }
+  
+  # Collecting testing data
+  test.data<- dat.full %>%
+    filter(., COMNAME == spp.match & SEASON == season.match) %>%
+    dplyr::select(TEST.DATA) %>%
+    unnest() %>%
+    data.frame()
+  temp<- dplyr::select(test.data, one_of(c("DEPTH.Scale", "SEASONALMU.OISST.Scale", "BIOMASS")))
+  test.data<- data.frame(na.omit(temp))
+  
+  # Predicting presence/absence, does NOT change with different candidate models, which only influence biomass curves
+  pred.p<- predict.gam(gam.p.temp, newdata = test.data, type = "response")
+  
+  # Predicting biomass component for each of the 1000 candidate models
+  # Prediction storage
+  preds.out<- data.frame("Pt" = seq(from = 1, nrow(test.data)), "Pred" = rep(NA, nrow(test.data)))
+  
+  for(j in 1:nrow(mods.temp)){
+    fit.mat<- matrix(as.numeric(mods.temp[j,]), nrow = 1, ncol = length(mods.temp[j,]), byrow = T, dimnames = list(NULL, gam.coef))
+    
+    # Make predictions with these values
+    lpmat.pred<- predict.gam(gam.b.temp, newdata = test.data, type = "lpmatrix")
+    preds.out[,j+1]<- as.numeric(exp(ilink(as.numeric(lpmat.pred %*% t(fit.mat))))*pred.p)
+    names(preds.out)[j+1]<- paste("Iteration.", j, sep = "")
+  }
+  
+  # Get the SDM predictions...
+  sdm.best<- likes.temp[likes.temp$SDM.Rank<= 100, ]
+  sdm.preds.best<- preds.out[,sdm.best$Iteration+1] %>%
+    gather(., "Iteration", "Prediction") %>%
+    separate(., Iteration, c("Remove", "Iteration")) %>%
+    dplyr::select(., -Remove) %>%
+    group_by(Iteration) %>%
+    nest(., .key = "Pred")
+  
+  # Get the NEVA predictions
+  neva.best<- likes.temp[likes.temp$NEVA.Rank<= 100, ]
+  neva.preds.best<- preds.out[,neva.best$Iteration+1] %>%
+    gather(., "Iteration", "Prediction") %>%
+    separate(., Iteration, c("Remove", "Iteration")) %>%
+    dplyr::select(., -Remove) %>%
+    group_by(Iteration) %>%
+    nest(., .key = "Pred") 
+  
+  # Prediction uncertainty -- for the top 85% of each method calculate the average per cell variability
+  sdm.preds.best.sd<- preds.out[,sdm.best$Iteration+1] %>%
+    mutate(., "Cell" = seq(from = 1, to = nrow(.))) %>%
+    gather(., "Iteration", "Prediction", -Cell) %>%
+    group_by(Cell) %>%
+    dplyr::summarize(., "Cell.SD" = sd(Prediction, na.rm = T)) 
+  sdm.preds.best.sd<- mean(sdm.preds.best.sd$Cell.SD)
+
+  neva.preds.best.sd<- preds.out[,neva.best$Iteration+1] %>%
+    mutate(., "Cell" = seq(from = 1, to = nrow(.))) %>%
+    gather(., "Iteration", "Prediction", -Cell) %>%
+    group_by(Cell) %>%
+    dplyr::summarize(., "Cell.SD" = sd(Prediction, na.rm = T)) 
+  neva.preds.best.sd<- mean(neva.preds.best.sd$Cell.SD)
+  
+  # For the top 85% of each method, validate each to get a RMSE and AUC value
+  test.data<- dat.full %>%
+    filter(., COMNAME == spp.match & SEASON == season.match) %>%
+    dplyr::select(TEST.DATA) %>%
+    unnest() %>%
+    data.frame()
+  temp<- dplyr::select(test.data, one_of(c("BIOMASS", "DEPTH.Scale", "SEASONALMU.OISST.Scale")))
+  test.data<- data.frame(na.omit(temp))
+  
+  sdm.summary<- sdm.preds.best %>%
+    mutate(., "RMSE" = map2(Pred, list(test.data), possibly(rmse_func, NA))) %>%
+    dplyr::select(., Iteration, RMSE) %>%
+    unnest() %>%
+    summarize_at(., vars("RMSE"), funs(mean, sd), na.rm = T)
+  
+  neva.summary<- neva.preds.best %>%
+    mutate(., "RMSE" = map2(Pred, list(test.data), possibly(rmse_func, NA))) %>%
+    dplyr::select(., Iteration, RMSE) %>%
+    unnest() %>%
+    summarize_at(., vars("RMSE"), funs(mean, sd), na.rm = T)
+  
+  neva.vs.sdm$COMNAME[i]<- spp.match
+  neva.vs.sdm$SEASON[i]<- season.match
+  neva.vs.sdm$SDM.SD.mu[i]<- sdm.preds.best.sd
+  neva.vs.sdm$NEVA.SD.mu[i]<- neva.preds.best.sd
+  neva.vs.sdm$NEVA.RMSE.mu[i]<- neva.summary$mean
+  neva.vs.sdm$NEVA.RMSE.sd[i]<- neva.summary$sd
+  neva.vs.sdm$SDM.RMSE.mu[i]<- sdm.summary$mean
+  neva.vs.sdm$SDM.RMSE.sd[i]<- sdm.summary$sd
 }
 
-# Did the AUC crop work?
-auc.res$Col.Check<- paste(auc.res$COMNAME, auc.res$SEASON, sep = ".")
-neva.vs.sdm$Col.Check<- paste(neva.vs.sdm$COMNAME, neva.vs.sdm$SEASON, sep = ".")
-temp<- auc.res$AUC.SDM[auc.res$Col.Check %in% neva.vs.sdm$Col.Check]
+# Improvement by reducing uncertainty?
+neva.vs.sdm.sd<- neva.vs.sdm$SDM.SD.mu - neva.vs.sdm$NEVA.SD.mu
 
+# Improvement by increasing prediction accuracy?
 rmse.cert.dat.mu<- neva.vs.sdm %>%
   dplyr::select(., COMNAME, SEASON, NEVA.RMSE.mu, SDM.RMSE.mu) %>%
   mutate(., "RMSE.mu.diff" = round(NEVA.RMSE.mu - SDM.RMSE.mu), 3) %>%
@@ -2041,9 +3395,7 @@ rmse.cert.plot<- ggplot(na.omit(rmse.cert.dat), aes(x = SENSITIVITY.CERTAINTY, y
 ggsave(paste(out.dir, "rmse.plot.jpg", sep = ""), height = 8, width = 11, units = "in")
 
 
-#####
-## SDM+NEVA vs. SDM plotting of parameter intervals?
-#####
+# Results — Combo vs SDM parameter intervals ------------------------------
 # Going to need access to the likelihood, prior and posterior information. This should be all in the mcmc results file for each species...
 res.files<- list.files(out.dir, "mcmc_")
 
@@ -2257,381 +3609,7 @@ for(i in seq_along(res.files)){
 }
 
 
-######
-## Port differences
-##### 
-out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_09222018/"
-fish_avail_func<- function(df) {
-  
-  if(FALSE){
-    row.use<- 1
-    data = dat.full$SDM.Diff[[row.use]]
-    update = paste(dat.full$COMNAME[[row.use]], dat.full$SEASON[[row.use]], sep = ".")
-  }
-  
-  dat.sp<- data.frame("x" = df$x, "y" = df$y, "z" = df$Projection)
-  coordinates(dat.sp)<- ~x+y
-  proj4string(dat.sp)<- proj.wgs84
-  
-  pts.rast<- rasterize(dat.sp, port.foots.stack[[1]], field = "z", fun = mean)
-  pts.rast<- raster::resample(pts.rast, port.foots.stack[[1]])
-  
-  res.mean<- vector(length = raster::nlayers(port.foots.stack), mode = "double")
-  res.mean[]<- NA
-  res.sd<- vector(length = raster::nlayers(port.foots.stack), mode = "double")
-  res.sd[]<- NA
-  
-  for(i in 1:raster::nlayers(port.foots.stack)) {
-    lay.use<- port.foots.stack[[i]]
-    
-    if(all(is.na(values(lay.use)))){
-      res.mean[i]<- NA
-      res.sd[i]<- NA
-    } else {
-      m <- c(0, Inf, 1,  -Inf, 0, 0)
-      rclmat <- matrix(m, ncol=3, byrow=TRUE)
-      lay.bin<- raster::reclassify(lay.use, rclmat)
-      
-      # Get coordinates of footprint
-      foot.pts <- data.frame(rasterToPoints(lay.bin, function(x) x == 1))
-      coordinates(foot.pts)<- ~x+y
-      proj4string(foot.pts)<- proj.wgs84
-      
-      # Okay, we need the projected values at those points and then the proportion of catch at each to use as the weights. 
-      # Projected p(presence)
-      proj.vals<- raster::extract(pts.rast, foot.pts)
-      # Proportion of catch
-      proj.weights<- raster::extract(lay.use, foot.pts)
-      
-      # Mean and SD
-      if(all(is.na(proj.vals))) {
-        res.mean[i]<- NA
-        res.sd[i]<- NA
-      } else {
-        if(length(proj.vals) == 1){
-          res.mean[i]<- mean(proj.vals, na.rm = T)
-          res.sd[i]<- NA
-        } else {
-          res.mean[i]<- mean(proj.vals, na.rm = T)
-          res.sd[i]<- sd(proj.vals, na.rm = T)
-        }
-      }
-    }
-  }
-  
-  out<- data.frame("Port" = names(port.foots.stack), "Mean.Avail" = res.mean, "SD.Avail" = res.sd)
-  return(out)
-}
-
-# Bring in fishing footprints
-all.foot.dat<- readRDS("~/GitHub/COCA/Data/VTR fishing footprints by community and gear type 2011-2015.rds")
-ports.names<- all.foot.dat$JGS.COMMUNITY
-
-# Spatial projections
-proj.wgs84<- "+init=epsg:4326" #WGS84
-proj.utm<- "+init=epsg:2960" #UTM 19
-
-# Some work on the names
-ports.names<- gsub("\\_(?=[^_]*\\_)", " ", ports.names, perl = TRUE)
-ports.names<- gsub(' +', ' ', ports.names)
-ports.names<- gsub("_", ".", ports.names)
-ports.names<- gsub(" ", "_", ports.names)
-ports.names<- gsub("/", "_", ports.names)
-
-# Let's get the lat and long for these areas -- first write it out to do some small edits
-if(FALSE){
-  write.csv(unique(ports.names), file = "~/Desktop/COCA_FishingPorts_NamesOnly.csv")
-  ports.longlat<- read.csv("~/Desktop/COCA_FishingPorts.csv")
-  geos.longlats<- geocode(location = paste(ports.longlat$PortName, ports.longlat$PortState), output = "latlon")
-  
-  # First go....
-  ports.longlat$PortLat<- geos.longlats$lat
-  ports.longlat$PortLong<- geos.longlats$lon
-  
-  # Missing after first time
-  ports.longlats.nas<- ports.longlat %>%
-    filter(., is.na(PortLong))
-  ports.longlats.nas2<- geocode(location = paste(ports.longlats.nas$PortName, ports.longlats.nas$PortState), output = "latlon")
-  ports.longlats.nas$PortLat<- ports.longlats.nas2$lat
-  ports.longlats.nas$PortLong<- ports.longlats.nas2$lon
-  
-  # Bind....
-  ports.longlat<- ports.longlat %>%
-    left_join(ports.longlats.nas)
-  
-  # Another go
-  ports.longlats.nas2<- ports.longlat %>%
-    filter(., is.na(PortLat))
-  ports.longlats.nas3<- geocode(location = paste(ports.longlats.nas2$PortName, ports.longlats.nas2$PortState), output = "latlon")
-  ports.longlats.nas2$PortLat<- ports.longlats.nas3$lat
-  ports.longlats.nas2$PortLong<- ports.longlats.nas3$lon
-  
-  # Bind...
-  ports.longlat<- ports.longlat %>%
-    left_join(ports.longlats.nas2)
-  
-  # Still some missing...write it out and add em manually
-  write.csv(ports.longlat, file = "~/Desktop/COCA_FishingPorts.csv")
-  ports.longlat<- read.csv("~/Desktop/COCA_FishingPorts.csv")
-}
-
-ports.longlat<- read.csv("~/GitHub/COCA/Data/COCA_FishingPorts.csv")
-
-# Fishing port footprints -- gear type specific
-gear.types<- all.foot.dat$COST_ID
-gear.types<- ifelse(gear.types == 1, "Dredge",
-                    ifelse(gear.types == 2, "Gillnet",
-                           ifelse(gear.types == 3, "Longline",
-                                  ifelse(gear.types == 4, "Pot/Trap",
-                                         ifelse(gear.types == 5, "Purse/Seine",
-                                                ifelse(gear.types == 6, "Trawl", "Other"))))))
-port.foot.names<- paste(ports.names, gear.types, sep = "-")
-ports.all.foots<- all.foot.dat$JGS.NOAA.SAFE.COMMUNITY.GEAR.FOOTPRINTS
-names(ports.all.foots)<- port.foot.names
-
-# Get proportion layer we want for each port-gear type
-port.foots<- unlist(lapply(ports.all.foots, "[", 3))
-port.foots.stack<- raster::stack(port.foots)
-names1<- names(port.foots.stack)
-rast.ind<- nlayers(port.foots.stack)
-
-# Also need an "all gear" option and a max distance option
-ports.only<- str_replace_all(names(port.foots.stack), c(".Pot.Trap.JGS.SAFE.PROPORTION" = "", ".Other.JGS.SAFE.PROPORTION" = "", ".Gillnet.JGS.SAFE.PROPORTION" = "", ".Trawl.JGS.SAFE.PROPORTION" = "", ".Dredge.JGS.SAFE.PROPORTION" = "", ".Purse.Seine.JGS.SAFE.PROPORTION" = "", ".Longline.JGS.SAFE.PROPORTION" = ""))
-ports.unique<- unique(ports.only)
-
-all.stack<- stack()
-
-for(i in 1:length(ports.unique)){
-  port.use<- ports.unique[i]
-  port.foots.ind<- which(grepl(port.use, names(port.foots.stack)), arr.ind = T)
-  stack.use<- port.foots.stack[[port.foots.ind]]
-  if(nlayers(stack.use) == 1 | all(is.na(getValues(stack.use)))){
-    all.gear.out<- stack.use[[1]]
-  } else {
-    all.gear.out<- sum(stack.use, na.rm = T)
-  }
-  all.stack<- raster::stack(all.stack, all.gear.out)
-}
-
-# Combine
-names.all<- c(names1, paste(ports.unique, ".All.JGS.SAFE.PROPORTION", sep = ""))
-check.stack<- raster::stack(port.foots.stack, all.stack)
-names(check.stack)<- names.all
-port.foots.stack<- check.stack
-
-# Now max distance option
-dist.fac<- 1.5
-
-# Similar loop, but we don't want to do this for the "All gear" scenario...
-port.foots.stack.noall<- port.foots.stack[[-which(grepl(".All.JGS.SAFE.PROPORTION", names(port.foots.stack)))]]
-
-# Empty stack for results
-stack.maxd<- stack()
-
-# Loop
-for(i in 1:nlayers(port.foots.stack.noall)){
-  lay.use<- port.foots.stack.noall[[i]]
-  
-  if(all(is.na(getValues(lay.use)))){
-    max.d<- lay.use
-    max.d.fac<- max.d
-    stack.maxd<- raster::stack(stack.maxd, max.d, max.d.fac)
-    next()
-  } else {
-    port.name.use<- str_replace_all(names(lay.use), c(".Pot.Trap.JGS.SAFE.PROPORTION" = "", ".Other.JGS.SAFE.PROPORTION" = "", ".Gillnet.JGS.SAFE.PROPORTION" = "", ".Trawl.JGS.SAFE.PROPORTION" = "", ".Dredge.JGS.SAFE.PROPORTION" = "", ".Purse.Seine.JGS.SAFE.PROPORTION" = "", ".Longline.JGS.SAFE.PROPORTION" = ""))
-    pt.use<- ports.longlat[ports.longlat$JGS.PortName == port.name.use, ]
-    coordinates(pt.use)<- ~PortLong+PortLat
-    proj4string(pt.use)<- proj.wgs84
-    
-    # Get distance from port, then get maximum distance given fishing for max dist and maxdist * 1.5
-    dist.rast<- distanceFromPoints(lay.use, pt.use)
-    max.d<- dist.rast
-    max.d.maxval<- maxValue(mask(dist.rast, lay.use))
-    max.d[max.d >= max.d.maxval]<- NA
-    max.d<- mask(max.d, lay.use, inverse = T)
-    
-    max.d.fac<- dist.rast
-    max.d.fac[max.d.fac >= max.d.maxval*dist.fac]<- NA
-    max.d.fac<- mask(max.d.fac, lay.use, inverse = T)
-    
-    stack.maxd<- raster::stack(stack.maxd, max.d, max.d.fac)
-  }
-}
-
-# Combine
-names.stackmaxd<- paste(rep(names(port.foots.stack.noall), each = 2), c("MaxD.JGS.SAFE.PROPORTION", "1.5xMaxD.JGS.SAFE.PROPORTION"), sep = "")
-names(stack.maxd)<- names.stackmaxd
-names.all<- c(names(port.foots.stack), names.stackmaxd)
-check.stack<- raster::stack(port.foots.stack, stack.maxd)
-names(check.stack)<- names.all
-port.foots.stack<- check.stack
-
-# Plots
-if(FALSE){
-  gsub_func1<- function(pattern, replacement, string){
-    out<- gsub(paste(pattern, ".", sep = ""), replacement, string)
-    return(out)
-  }
-  
-  gsub_func2<- function(pattern, replacement, string){
-    out<- gsub(pattern, replacement, string)
-    return(out)
-  }
-  
-  #Bounds
-  xlim.use<- c(-77, -65)
-  ylim.use<- c(35, 45)
-  
-  states <- c("Maine", "New Hampshire", "Massachusetts", "Vermont", "New York", "Rhode Island", "Connecticut", "Delaware", "New Jersey", "Maryland", "Pennsylvania", "Virginia", "North Carolina", "South Carolina", "Georgia", "Florida", "District of Columbia", "West Virgina")
-  provinces <- c("Ontario", "Québec", "Nova Scotia", "New Brunswick")
-  
-  us <- raster::getData("GADM",country="USA",level=1)
-  us.states <- us[us$NAME_1 %in% states,]
-  us.states <- gSimplify(us.states, tol = 0.025, topologyPreserve = TRUE)
-  canada <- raster::getData("GADM",country="CAN",level=1)
-  ca.provinces <- canada[canada$NAME_1 %in% provinces,]
-  ca.provinces <- gSimplify(ca.provinces, tol = 0.025, topologyPreserve = TRUE)
-  
-  us.states.f<- fortify(us.states, NAME_1)
-  ca.provinces.f<- fortify(ca.provinces, NAME_1)
-
-  focal.ports<- c("STONINGTON.ME", "PORTLAND.ME", "NEW_BEDFORD.MA", "POINT_JUDITH.RI")
-  port.foots.focal<-  port.foots.stack[[which(str_detect(names(port.foots.stack), paste(focal.ports, collapse = "|")))]]
-  gear.types<- c("Dredge", "Gillnet", "Longline", "Pot.Trap", "Purse.Seine", "Trawl", "Other")
-  
-  # Make panel plot for each gear type: Ports as rows, Fishing footprint as columns
-  for(i in seq_along(gear.types)){
-    port.foots.use<- port.foots.focal[[which(str_detect(names(port.foots.focal), gear.types[i]))]]
-    names(port.foots.use)<- str_replace_all(names(port.foots.use), c(".JGS.SAFE.PROPORTION" = ""))
-    
-    out.df<- as.data.frame(port.foots.use, xy = T) %>%
-      gather(., "Port_Gear", "Z", -x, -y)
-    
-    gear.replace<- paste('.', gear.types[i], sep = '')
-    out.df$Port<- gsub(gear.replace, "", out.df$Port_Gear)
-    out.df$Port<- gsub("MaxD", "", out.df$Port)
-    out.df$Port<- gsub("1.5x", "", out.df$Port)
-    out.df<- out.df %>%
-      as_tibble() %>%
-      mutate(., "Gear" = pmap(list(pattern = Port, replacement = list(""), string = Port_Gear), gsub_func1)) %>%
-      data.frame()
-    out.df$Footprint<- ifelse(str_detect(out.df$Port_Gear, "1.5x"), "1.5xExtended", 
-                              ifelse(str_detect(out.df$Port_Gear, "MaxD"), "Extended", "Regular"))
-    out.df$Z<- ifelse(out.df$Z > 0, "Fished", out.df$Z)
-    out.df$Footprint<- factor(out.df$Footprint, levels = c("Regular", "Extended", "1.5xExtended"))
-    
-    plot.out<- ggplot() + 
-      geom_tile(data = out.df, aes(x = x, y = y, fill = Z), show.legend = FALSE) +
-      scale_fill_manual(values = "#31a354", na.value = "white") +
-      geom_map(data = us.states.f, map = us.states.f,
-               aes(map_id = id, group = group),
-               fill = "gray65", color = "gray45", size = 0.15) +
-      geom_map(data = ca.provinces.f, map = ca.provinces.f,
-               aes(map_id = id, group = group),
-               fill = "gray65", color = "gray45", size = 0.15) +
-      ylim(ylim.use) + ylab("Lat") +
-      scale_x_continuous("Long", breaks = c(-75.0, -70.0, -65.0), labels = c("-75.0", "-70.0", "-65.0"), limits = xlim.use) +
-      coord_fixed(1.3) + 
-      theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"), legend.text=element_text(size=8), legend.title=element_text(size=8)) +
-      ggtitle(gear.types[i]) +
-      facet_wrap(~Port+Footprint, ncol = 3)
-    ggsave(paste(out.dir, gear.types[i], "Footprints.jpg", sep = ""), plot.out, width = 11, height = 8, units = "in")
-  }
-}
-
-# Read in results and apply fish availability function to each of the projections datasets
-results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) %>%
-  mutate(., "Fish.Availability" = map(Projections, fish_avail_func))
-
-saveRDS(results, paste(out.dir, "FishAvailability.rds", sep = ""))
-
-# Ideally, we want species-season-port and then all the changes as columns...
-results<- readRDS(paste(out.dir, "FishAvailability.rds", sep = ""))
-results$spp.season<- paste(results$COMNAME, results$SEASON, sep = ".")
-spp.season<- paste(rep(unique(results$COMNAME), each = 2), rep(c("FALL", "SPRING")), sep = ".")
-
-for(i in seq_along(spp.season)){
-  dat.temp<- results[results$spp.season == spp.season[i],]
-  
-  if(nrow(dat.temp) == 0){
-    print(paste(spp.season[i], " is done!", sep = " "))
-    next()
-  }
-  
-  dat.temp<- dat.temp %>% 
-    dplyr::select(., COMNAME, SEASON, Proj.Class, Fish.Availability) %>%
-    unnest(Fish.Availability) %>%
-    gather(., "Stat", "Value", -COMNAME, -SEASON, -Proj.Class, -Port) %>%
-    unite(Port.Stat, Port, Stat) %>%
-    spread(Proj.Class, Value) %>%
-    separate(Port.Stat, c("Port", "Stat"), sep = "_[^_]*$")
-  dat.temp$Stat<- rep(c("Mean", "SD"), length.out = nrow(dat.temp))
-  
-  if(i == 1){
-    result<- dat.temp
-    print(paste(spp.season[i], " is done!", sep = " "))
-  } else {
-    result<- bind_rows(result, dat.temp)
-    print(paste(spp.season[i], "is done!", sep = " "))
-  }
-}
-
-# Group by species and Port, take column means
-out<- result %>% 
-  group_by(COMNAME, Port, Stat) %>%
-  summarize_if(is.double, mean, na.rm = T) %>%
-  arrange(., COMNAME, Stat, Port)
-
-# Separate Port and Gear Type
-port.data.out<- out
-names(port.data.out)[2]<- "Port_GearType"
-
-# First Do gear types...
-port.data.out$Gear<- ifelse(grepl(".Pot.Trap", port.data.out$Port_GearType), "Pot.Trap",
-                    ifelse(grepl(".Gillnet", port.data.out$Port_GearType), "Gillnet",
-                           ifelse(grepl(".Longline", port.data.out$Port_GearType), "Longline",
-                                  ifelse(grepl(".Dredge", port.data.out$Port_GearType), "Dredge",
-                                         ifelse(grepl(".Purse.Seine", port.data.out$Port_GearType), "Purse.Seine",
-                                                ifelse(grepl(".Trawl", port.data.out$Port_GearType), "Trawl",
-                                                       ifelse(grepl(".All", port.data.out$Port_GearType), "All", "Other")))))))
-port.data.out$Footprint<- ifelse(str_detect(port.data.out$Port_GearType, "1.5xMaxD.JGS.SAFE.PROPORTION"), "1.5xMaxD", "Regular")
-port.data.out$Footprint<- ifelse(str_detect(port.data.out$Port_GearType, "MaxD.JGS.SAFE.PROPORTION") & port.data.out$Footprint == "Regular", "MaxD", port.data.out$Footprint)
-
-port.data.out$Port.OnlyTemp<- str_replace_all(port.data.out$Port_GearType, c(".JGS.SAFE.PROPORTION"), "") 
-port.data.out$Port.OnlyTemp2<- str_replace_all(port.data.out$Port.OnlyTemp, c("1.5xMaxD"), "")
-port.data.out$Port.OnlyTemp3<- str_replace_all(port.data.out$Port.OnlyTemp2, c("MaxD"), "")
-port.data.out$Port.Only<- str_replace_all(port.data.out$Port.OnlyTemp3, c(".Pot.Trap" = "", ".Dredge" = "", ".Longline" = "", ".All" = "", ".Other" = "", ".Gillnet" = "", ".Trawl" = "", ".Purse.Seine" = ""))
-
-# Community and State
-port.data.out$Community.Only<- unlist(lapply(strsplit(sub("\\.", "*", port.data.out$Port.Only), "\\*"), "[", 1))
-port.data.out$State.Only<- unlist(lapply(strsplit(sub("\\.", "*", port.data.out$Port.Only), "\\*"), "[", 2))
-
-port.data.out<- port.data.out %>%
-  ungroup() %>%
-  dplyr::select(., COMNAME, Port_GearType, Community.Only, State.Only, Gear, Footprint, colnames(port.data.out)[3:24])
-
-# Merge with Brad's port names
-merge.table<- read_csv("~/GitHub/COCA/Data/JGS_vs_CFDERRS_PortNamesMatchTable.csv")
-merge.table$Merge.Col<- gsub(" ", "_", merge.table$`JGS FULL NAME`)
-
-port.data.out$Merge.Col<- paste(gsub("[.]", "_", gsub(" ", "_", port.data.out$Community.Only)), port.data.out$State.Only, sep = "_")
-port.data.out$Econ.Port.Name<- merge.table$`BRAD PORT_NAME_STATE`[match(port.data.out$Merge.Col, merge.table$Merge.Col)]
-port.data.out<- port.data.out %>%
-  dplyr::select(., COMNAME, Port_GearType, Community.Only, State.Only, Econ.Port.Name, Gear, Footprint, colnames(port.data.out)[7:28])
-
-names(port.data.out)<- gsub(x = names(port.data.out), pattern = "\\.", replacement = "_")
-port.data.out$Gear<- gsub("[.]", "_", port.data.out$Gear)
-write.csv(port.data.out, "~/GitHub/COCA/Results/PortData10142018.csv")
-
-# Filter for Brad...
-brad<- port.data.out %>%
-  filter(., Stat == "Mean")
-write.csv(brad, "~/GitHub/COCA/Results/BradPortData10162018.csv")
-
-
-#####
-## Shelfwide and regional changes
-#####
+# Results — Combo shelfwide and regional changes --------------------------
 out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_09222018/"
 results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) # This should have everything we need. Let's get the model fit, too....
 mod.results<- read.csv(paste(out.dir, "mod.results.csv", sep = ""))
@@ -2641,414 +3619,8 @@ dat.full<- results %>%
 dat.full$AUC.SDM[is.na(dat.full$AUC.SDM)]<- 0
 
 dat.sub<- dat.full %>%
-  filter(., AUC.SDM >= 0.70)
-
-# Missing season?
-dat.cut<- dat.sub %>%
-  group_by(., COMNAME) %>%
-  summarize_at(vars(SEASON), n_distinct) %>%
-  filter(., SEASON < 2)
-
-dat.sub<- dat.sub %>%
-  filter(., !COMNAME %in% dat.cut$COMNAME)
-
-dat.full<- dat.sub
-
-# Spatial projections
-proj.wgs84<- CRS("+init=epsg:4326") #WGS84
-proj.utm<- CRS("+init=epsg:2960") #UTM 19
-
-# NELME
-nelme<- st_read("~/GitHub/COCA/Data/NELME_clipped.shp")
-st_crs(nelme)<- "+init=epsg:4326"
-nelme.sp<- as(nelme, "Spatial")
-
-# GoM
-gom<- st_read("~/GitHub/COCA/Data/GoMPhysioRegions/PhysioRegions_WGS84.shp")
-st_crs(gom)<- "+init=epsg:4326"
-gom<- gom[!gom$Region == "Seamount",] %>%
-  st_union() %>%
-  st_sf()
-gom.sp<- as(st_zm(gom), "Spatial")
-gom.sp<- spTransform(gom.sp, proj.utm)
-gom.sp.wgs<-  spTransform(gom.sp, proj4string(nelme.sp))
-
-# Buffer it a bit
-gom.buff<- gBuffer(gom.sp, width = 7500)
-gom.buff<- spTransform(gom.buff, proj4string(nelme.sp))
-
-# Southern regions
-south<- erase(nelme.sp, gom.buff)
-
-# Still a bit remaining...custom box to get rid of the rest of it
-# Coordinates
-ow<- data.frame("x" = c(-71, -71, -67, -67), "y" = c(42, 46, 46, 42))
-
-# Convert coordinates to Spatial Polygons
-ow.p<- Polygon(ow)
-ow.ps<- Polygons(list(ow.p), 1)
-ow.sp<- SpatialPolygons(list(ow.ps))
-proj4string(ow.sp)<- proj4string(nelme.sp)
-south2<- erase(south, ow.sp)
-proj4string(south2)<- proj4string(nelme.sp)
-
-# Check em ---
-if(FALSE){
-  plot(nelme.sp)
-  plot(gom.sp.wgs, col = "red", add = T)
-  plot(south2, col = "blue", add = T)
-}
-
-# Overlay func
-overlay_func<- function(df, region, proj.use = proj4string(nelme.sp)){
-  dat.use<- data.frame(df)
-  pts.temp<- dat.use
-  coordinates(pts.temp)<- ~x+y
-  proj4string(pts.temp)<- proj.use
-  
-  switch(region,
-         NELME = mean(dat.use[,3], na.rm = T),
-         GOM = mean(data.frame(pts.temp[!is.na(over(pts.temp, as(gom.sp.wgs, "SpatialPolygons"))),])[,3], na.rm = T),
-         South = mean(data.frame(pts.temp[!is.na(over(pts.temp, as(south2, "SpatialPolygons"))),])[,3], na.rm = T))
-}
-
-preds.df.sub<- dat.full %>%
-  mutate(., "NELME.Mean.Change" = purrr::map2(Projections, list("NELME"), possibly(overlay_func, NA)),
-         "GOM.Mean.Change" = purrr::map2(Projections, list("GOM"), possibly(overlay_func, NA)),
-         "South.Mean.Change" = purrr::map2(Projections, list("South"), possibly(overlay_func, NA)))
-
-overlay_perc_func<- function(df.base, df.future, region, proj.use = proj4string(nelme.sp)){
-  dat.use.base<- data.frame(df.base)
-  pts.temp.base<- dat.use.base
-  coordinates(pts.temp.base)<- ~x+y
-  proj4string(pts.temp.base)<- proj.use
-  
-  dat.use.fut<- data.frame(df.future)
-  pts.temp.fut<- dat.use.fut
-  coordinates(pts.temp.fut)<- ~x+y
-  proj4string(pts.temp.fut)<- proj.use
-  
-  base.mean<- switch(region,
-         NELME = mean(dat.use.base[,3], na.rm = T),
-         GOM = mean(data.frame(pts.temp.base[!is.na(over(pts.temp.base, as(gom.sp.wgs, "SpatialPolygons"))),])[,3], na.rm = T),
-         South = mean(data.frame(pts.temp.base[!is.na(over(pts.temp.base, as(south2, "SpatialPolygons"))),])[,3], na.rm = T))
-  
-  fut.mean<- switch(region,
-                    NELME = mean(dat.use.fut[,3], na.rm = T),
-                    GOM = mean(data.frame(pts.temp.fut[!is.na(over(pts.temp.fut, as(gom.sp.wgs, "SpatialPolygons"))),])[,3], na.rm = T),
-                    South = mean(data.frame(pts.temp.fut[!is.na(over(pts.temp.fut, as(south2, "SpatialPolygons"))),])[,3], na.rm = T))
-  
-  perc.out<- 100*((fut.mean - base.mean)/base.mean)
-  return(perc.out)
-}
-
-preds.df.sub.perc<- preds.df.sub %>%
-  dplyr::select(., COMNAME, SEASON, Proj.Class, Projections) %>%
-  spread(., Proj.Class, Projections) %>%
-  mutate(., "NELME.Mean.Perc.Change.mu.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_mean.sdm.p, list("NELME")), possibly(overlay_perc_func, NA)),
-         "NELME.Mean.Perc.Change.mu.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_mean.combo.b, list("NELME")), possibly(overlay_perc_func, NA)),
-         "NELME.Mean.Perc.Change.warm.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_warm.sdm.p, list("NELME")), possibly(overlay_perc_func, NA)),
-         "NELME.Mean.Perc.Change.warm.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_warm.combo.b, list("NELME")), possibly(overlay_perc_func, NA)),
-         "NELME.Mean.Perc.Change.cold.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_cold.sdm.p, list("NELME")), possibly(overlay_perc_func, NA)),
-         "NELME.Mean.Perc.Change.cold.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_cold.combo.b, list("NELME")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.mu.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_mean.sdm.p, list("GOM")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.mu.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_mean.combo.b, list("GOM")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.warm.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_warm.sdm.p, list("GOM")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.warm.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_warm.combo.b, list("GOM")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.cold.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_cold.sdm.p, list("GOM")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.cold.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_cold.combo.b, list("GOM")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.mu.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_mean.sdm.p, list("South")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.mu.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_mean.combo.b, list("South")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.warm.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_warm.sdm.p, list("South")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.warm.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_warm.combo.b, list("South")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.cold.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_cold.sdm.p, list("South")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.cold.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_cold.combo.b, list("South")), possibly(overlay_perc_func, NA)))
-  
-preds.df.sub.perc.plot<- preds.df.sub.perc %>%
-  dplyr::select(., COMNAME, SEASON, NELME.Mean.Perc.Change.mu.p, NELME.Mean.Perc.Change.mu.b, NELME.Mean.Perc.Change.warm.p, NELME.Mean.Perc.Change.warm.b, NELME.Mean.Perc.Change.cold.p, NELME.Mean.Perc.Change.cold.b, GOM.Mean.Perc.Change.mu.p, GOM.Mean.Perc.Change.mu.b, GOM.Mean.Perc.Change.warm.p, GOM.Mean.Perc.Change.warm.b, GOM.Mean.Perc.Change.cold.p, GOM.Mean.Perc.Change.cold.b, South.Mean.Perc.Change.mu.p, South.Mean.Perc.Change.mu.b, South.Mean.Perc.Change.warm.p, South.Mean.Perc.Change.warm.b, South.Mean.Perc.Change.cold.p, South.Mean.Perc.Change.cold.b) %>%
-  gather(., "Region_Scenario", "Change", -COMNAME, -SEASON)
-preds.df.sub.perc.plot$Region_Only<- unlist(lapply(strsplit(preds.df.sub.perc.plot$Region_Scenario, "[.]"), "[", 1))
-preds.df.sub.perc.plot$Scenario_Only<- unlist(lapply(strsplit(sub("[.]", "*", preds.df.sub.perc.plot$Region_Scenario), "[*]"), "[", 2))
-preds.df.sub.perc.plot$Response_Only<- ifelse(grepl(".p", preds.df.sub.perc.plot$Scenario_Only, fixed = T), "Presence", "Biomass")
-preds.df.sub.perc.plot$Climate_Only<- ifelse(grepl("mu", preds.df.sub.perc.plot$Region_Scenario), "Mean", 
-                                             ifelse(grepl("warm", preds.df.sub.perc.plot$Region_Scenario), "Warm", "Cold"))
-
-## Alright, we are now after a species - scenario - season - region - mean change dataframe...
-res<- preds.df.sub.perc.plot 
-res$Change<- as.numeric(unlist(res$Change))
-res$Change<- ifelse(res$Change >= 500, 500, res$Change)
-
-# Biomass shelfwide warm and cold...
-plot.type.use<- "Biomass"
-res.plot<- res %>%
-  dplyr::filter(., Response_Only == plot.type.use)
-
-# Lets add a functional group column...
-# Merge with functional groups....
-func.groups<- read.csv("~/GitHub/COCA/Data/JHareSppFunctionalGroup.csv")
-func.groups$COMNAME<- toupper(func.groups$COMNAME)
-
-res.plot<- res.plot %>%
-  left_join(., func.groups, by = "COMNAME")
-res.plot<- res.plot[!is.na(res.plot$Functional.Group),]
-res.plot$Functional.Group<- factor(res.plot$Functional.Group, levels = c("Groundfish", "Pelagic", "Coastal", "Invertebrates", "Diadromous", "Elasmobranch"))
-res.plot<- res.plot %>%
-  dplyr::select(., -Region_Scenario, -Scenario_Only) %>%
-  dplyr::arrange(., COMNAME, Functional.Group, SEASON, Region_Only, Climate_Only, Change)
-res.plot$COMNAME<- factor(res.plot$COMNAME, levels = unique(res.plot$COMNAME))
-res.plot$SEASON<- factor(res.plot$SEASON, levels = c("FALL", "SPRING"))
-res.plot$Climate_Only<- factor(res.plot$Climate_Only, levels = c("Mean", "Warm", "Cold"))
-res.plot$Region_Only<- factor(res.plot$Region_Only, levels = c("NELME", "GOM", "South"))
-
-res.plot.nelme<- res.plot %>%
-  dplyr::filter(., Region_Only == "NELME")
-res.plot.gom<- res.plot %>%
-  dplyr::filter(., Region_Only == "GOM")
-res.plot.south<- res.plot %>%
-  dplyr::filter(., Region_Only == "South")
-
-res.plot.all<- list(res.plot.nelme, res.plot.gom, res.plot.south)
-names(res.plot.all)<- c("NELME", "GoM", "South")
-
-
-## Climate variability across the shelf by season
-df<- data.frame(res.plot.all[[1]])
-df.null<- cbind(expand.grid(COMNAME = levels(res.plot.nelme$COMNAME), SEASON = unique(res.plot.nelme$SEASON), Climate_Only = unique(res.plot.nelme$Climate_Only), Region_Only = levels(res.plot.nelme$Region_Only), Response_Only = plot.type.use, Change = NA))
-df.null<- df.null %>%
-  left_join(., func.groups, by = "COMNAME")
-df<- rbind(df[,], df.null)
-df$duplicated<- paste(df$COMNAME, df$SEASON, df$Climate_Only, df$Functional.Group)
-df<- df[!duplicated(df$duplicated),] %>%
-  arrange(., COMNAME, SEASON)
-
-for(j in seq_along(levels(df$SEASON))){
-  dat.use<- df %>%
-    dplyr::filter(., SEASON == levels(df$SEASON)[j])
-  
-  dodge <- position_dodge(width = 1)
-  
-  dat.use.df<- dat.use %>%
-    tidyr::complete(COMNAME, SEASON)
-  dat.use.df$COMNAME<- str_to_title(dat.use.df$COMNAME)
-  dat.use.df$COMNAME<- factor(dat.use.df$COMNAME, levels = rev(unique(dat.use.df$COMNAME)))
-  
-  dat.use.df<- dat.use.df %>%
-    drop_na(Change)
-  #dat.use.df$Count<- ifelse(dat.use.df$Change == 0, 0, ifelse(dat.use.df$Change > 0, 2, -1))
-  #grouped.df<- dat.use.df %>%
-    #group_by(., COMNAME) %>%
-    #dplyr::summarize(., "Plot.Group" = sum(Count))
-  
-  # Join
-  #dat.use.df<- dat.use.df %>%
-    #left_join(., grouped.df, by = "COMNAME")
-  #dat.use.df$Plot.Group<- factor(dat.use.df$Plot.Group, levels = rev(c(-2, -1, 1, 0, 2, 4)))
-  #dat.use.df<- dat.use.df %>%
-    #arrange(., Plot.Group, COMNAME, SEASON)
-  dat.use.df$COMNAME.Plot<- factor(dat.use.df$COMNAME, levels = rev(unique(dat.use.df$COMNAME)))
-  dat.use.df$Scenario<- ifelse(dat.use.df$Climate_Only == "Cold", "Cold",
-                               ifelse(dat.use.df$Climate_Only == "Warm", "Warm", "Average"))
-  dat.use.df$Scenario<- factor(dat.use.df$Scenario, levels = c("Cold", "Average", "Warm"))
- 
-  plot.out<- ggplot(data = dat.use.df, aes(x = COMNAME.Plot, y = Change, color = Scenario)) + 
-    geom_hline(yintercept = 0, color = "#bdbdbd") +
-    geom_point(alpha = 0.7, size = 2.5) +
-    scale_color_manual("Climate Scenario", values = c("#3182bd", "#636363", "#de2d26")) +
-    ylab("Percent change in relative biomass") + 
-    xlab("Species") +
-    ylim(c(-100, 500)) +
-    theme_bw() +
-    theme(text = element_text(size = 12),
-          strip.background = element_blank(),
-          panel.border = element_rect(colour = "black")) +
-    coord_flip() +
-    facet_wrap(~Functional.Group, scales = "free_y") +
-    ggtitle(paste(names(res.plot.all)[i], levels(df$SEASON)[j], sep = " "))
-  
-  ggplot2::ggsave(filename = paste(out.dir, plot.type.use, names(res.plot.all)[1], levels(df$SEASON)[j], ".jpg", sep = ""), plot = plot.out, width = 11, height = 8, units = "in")
-}
-
-
-### Season, differences by region
-df<- data.frame(rbind(res.plot.all[[2]], res.plot.all[[3]]))
-df<- df %>%
-  filter(., as.character(Climate_Only) == "Mean" & as.character(Response_Only) == "Biomass")
-df$Region_Only<- factor(df$Region_Only, levels = c("GOM", "South"))
-df.null<- cbind(expand.grid(COMNAME = levels(df$COMNAME), SEASON = unique(df$SEASON), Climate_Only = unique(df$Climate_Only), Region_Only = levels(df$Region_Only), Response_Only = plot.type.use, Change = NA))
-df.null<- df.null %>%
-  left_join(., func.groups, by = "COMNAME")
-df<- rbind(df[,], df.null)
-df$duplicated<- paste(df$COMNAME, df$SEASON, df$Region_Only, df$Functional.Group)
-df<- df[!duplicated(df$duplicated),] %>%
-  arrange(., COMNAME, SEASON) 
-spp.keep<- df %>%
-  group_by(COMNAME) %>%
-  summarize_at(vars(Change), n_distinct, na.rm = T) %>%
-  filter(., Change == 4) %>%
-  dplyr::select(., COMNAME)
-df<- df %>%
-  filter(., as.character(COMNAME) %in% as.character(spp.keep$COMNAME))
-
-# One plot per season, regional differences
-seasons<- c("FALL", "SPRING")
-for(i in seq_along(seasons)){
-  dat.use<- df %>%
-    filter(., SEASON == seasons[i])
-  dodge <- position_dodge(width = 1)
-
-  dat.use$COMNAME<- str_to_title(dat.use$COMNAME)
-  dat.use$COMNAME<- factor(dat.use$COMNAME, levels = rev(unique(dat.use$COMNAME)))
-  
-  dat.use.df<- dat.use %>%
-    drop_na(Change)
-  # dat.use.df$Count<- ifelse(dat.use.df$Change == 0, 0, ifelse(dat.use.df$Change > 0, 2, -1))
-  # grouped.df<- dat.use.df %>%
-  #   group_by(., COMNAME) %>%
-  #   dplyr::summarize(., "Plot.Group" = sum(Count))
-  
-  # Join
-  # dat.use.df<- dat.use.df %>%
-  #   left_join(., grouped.df, by = "COMNAME")
-  # dat.use.df$Plot.Group<- factor(dat.use.df$Plot.Group, levels = rev(c(-2, -1, 1, 0, 2, 4)))
-  # dat.use.df<- dat.use.df %>%
-  #   arrange(., Plot.Group, COMNAME, Region_Only)
-  dat.use.df$COMNAME.Plot<- factor(dat.use.df$COMNAME, levels = rev(unique(dat.use.df$COMNAME)))
- 
-  plot.means<- ggplot(data = dat.use.df, aes(x = COMNAME.Plot, y = Change, fill = Region_Only)) + 
-    geom_bar(stat = "identity", width = 0.6, position = position_dodge(width = 0.6)) +
-    scale_fill_manual(name = "Region", values  = c("#377eb8", "#ff7f00")) +
-    ylab("Percent change in relative biomass") + 
-    xlab("Species") +
-    geom_hline(yintercept = 0) +
-    theme_bw() +
-    theme(text = element_text(size = 12),
-          strip.background = element_blank(),
-          panel.border = element_rect(colour = "black")) +
-    coord_flip() +
-    facet_wrap(~Functional.Group, scales = "free_y") +
-    ggtitle(paste(seasons[i], sep = " "))
-  
-  ggplot2::ggsave(filename = paste(out.dir, plot.type.use, seasons[i], ".jpg", sep = ""), plot = plot.means, width = 11, height = 8, units = "in")
-}
-
-
-## Other presence and biomass plots
-if(FALSE){
-  plot.types<- c("Presence", "Biomass")
-  
-  for(g in seq_along(plot.types)){
-    plot.type.use<- plot.types[g]
-    
-    res.plot<- res %>%
-      dplyr::filter(., Response_Only == plot.type.use)
-    
-    # Lets add a functional group column...
-    # Merge with functional groups....
-    func.groups<- read.csv("~/GitHub/COCA/Data/JHareSppFunctionalGroup.csv")
-    func.groups$COMNAME<- toupper(func.groups$COMNAME)
-    
-    res.plot<- res.plot %>%
-      left_join(., func.groups, by = "COMNAME")
-    res.plot<- res.plot[!is.na(res.plot$Functional.Group),]
-    res.plot$Functional.Group<- factor(res.plot$Functional.Group, levels = c("Groundfish", "Pelagic", "Coastal", "Invertebrates", "Diadromous", "Elasmobranch"))
-    res.plot<- res.plot %>%
-      dplyr::select(., -Region_Scenario, -Scenario_Only) %>%
-      dplyr::arrange(., COMNAME, Functional.Group, SEASON, Region_Only, Climate_Only, Change)
-    res.plot$COMNAME<- factor(res.plot$COMNAME, levels = unique(res.plot$COMNAME))
-    res.plot$SEASON<- factor(res.plot$SEASON, levels = c("FALL", "SPRING"))
-    res.plot$Climate_Only<- factor(res.plot$Climate_Only, levels = c("Mean", "Warm", "Cold"))
-    res.plot$Region_Only<- factor(res.plot$Region_Only, levels = c("NELME", "GOM", "South"))
-    
-    res.plot.nelme<- res.plot %>%
-      dplyr::filter(., Region_Only == "NELME")
-    res.plot.gom<- res.plot %>%
-      dplyr::filter(., Region_Only == "GOM")
-    res.plot.south<- res.plot %>%
-      dplyr::filter(., Region_Only == "South")
-    
-    res.plot.all<- list(res.plot.nelme, res.plot.gom, res.plot.south)
-    names(res.plot.all)<- c("NELME", "GoM", "South")
-    
-    for(i in seq_along(res.plot.all)){
-      df<- data.frame(res.plot.all[[i]])
-      df.null<- cbind(expand.grid(COMNAME = levels(res.plot.nelme$COMNAME), SEASON = unique(res.plot.nelme$SEASON), Climate_Only = unique(res.plot.nelme$Climate_Only), Region_Only = levels(res.plot.nelme$Region_Only), Response_Only = plot.type.use, Change = NA))
-      df.null<- df.null %>%
-        left_join(., func.groups, by = "COMNAME")
-      df<- rbind(df[,], df.null)
-      df$duplicated<- paste(df$COMNAME, df$SEASON, df$Climate_Only, df$Functional.Group)
-      df<- df[!duplicated(df$duplicated),] %>%
-        arrange(., COMNAME, SEASON)
-      
-      for(j in seq_along(levels(df$SEASON))){
-        dat.use<- df %>%
-          dplyr::filter(., SEASON == levels(df$SEASON)[j])
-        
-        dodge <- position_dodge(width = 1)
-        
-        dat.use.df<- dat.use %>%
-          tidyr::complete(COMNAME, SEASON)
-        dat.use.df$COMNAME<- str_to_title(dat.use.df$COMNAME)
-        dat.use.df$COMNAME<- factor(dat.use.df$COMNAME, levels = rev(unique(dat.use.df$COMNAME)))
-        
-        dat.use.df<- dat.use.df %>%
-          drop_na(Change)
-        dat.use.df$Count<- ifelse(dat.use.df$Change == 0, 0, ifelse(dat.use.df$Change > 0, 2, -1))
-        grouped.df<- dat.use.df %>%
-          group_by(., COMNAME) %>%
-          dplyr::summarize(., "Plot.Group" = sum(Count))
-        
-        # Join
-        dat.use.df<- dat.use.df %>%
-          left_join(., grouped.df, by = "COMNAME")
-        dat.use.df$Plot.Group<- factor(dat.use.df$Plot.Group, levels = rev(c(-2, -1, 1, 0, 2, 4)))
-        dat.use.df<- dat.use.df %>%
-          arrange(., Plot.Group, COMNAME, SEASON)
-        dat.use.df$COMNAME.Plot<- factor(dat.use.df$COMNAME, levels = unique(dat.use.df$COMNAME))
-        
-        means.df<- dat.use.df %>%
-          dplyr::filter(., Climate_Only == "Mean")
-        scenarios.df<- dat.use.df %>%
-          dplyr::filter(., Climate_Only != "Mean")
-        scenarios.df$Scenario<- ifelse(grepl("cold", scenarios.df$Climate_Only), "Cold", "Warm")
-        scenarios.df$Scenario<- factor(scenarios.df$Climate_Only, levels = c("Cold", "Warm"))
-        
-        plot.means<- ggplot(data = means.df, aes(COMNAME.Plot, Change)) + 
-          geom_bar(stat = "identity", width = 0.6, position = position_dodge(width = 0.6)) +
-          geom_hline(yintercept = 0) +
-          theme_bw() +
-          theme(text = element_text(size = 12)) +
-          coord_flip() +
-          facet_wrap(~Functional.Group, scales = "free") +
-          ggtitle(paste(names(res.plot.all)[i], levels(df$SEASON)[j], sep = " "))
-        
-        plot.error<- plot.means +
-          geom_point(data = scenarios.df, aes(COMNAME.Plot, Change, color = Scenario)) +
-          scale_color_manual("Climate Scenario", values = c("#3182bd", "#de2d26")) +
-          coord_flip() +
-          facet_wrap(~Functional.Group, scales = "free")
-        
-        ggplot2::ggsave(filename = paste(out.dir, plot.type.use, names(res.plot.all)[i], levels(df$SEASON)[j], ".jpg", sep = ""), plot = plot.error, width = 11, height = 8, units = "in")
-      }
-      
-      print(paste(plot.type.use, names(res.plot.all)[i], levels(df$SEASON)[j], "is done!", sep = " "))
-    }
-  }
-}
-
-
-#####
-## SDM vs NEVA shelfwide changes
-#####
-out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_09222018/"
-results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) # This should have everything we need. Let's get the model fit, too....
-mod.results<- read.csv(paste(out.dir, "mod.results.csv", sep = ""))
-dat.full<- results %>%
-  left_join(., mod.results, by = c("COMNAME", "SEASON")) %>%
-  dplyr::select(., -X)
-dat.full$AUC.SDM[is.na(dat.full$AUC.SDM)]<- 0
-
-dat.sub<- dat.full %>%
-  filter(., AUC.SDM >= 0.70)
+  filter(., AUC.SDM >= 0.70) %>%
+  filter(., DevExp.B >= 0.05)
 
 # Missing season?
 dat.cut<- dat.sub %>%
@@ -3123,7 +3695,7 @@ preds.df.sub.perc.plot<- preds.df.sub.perc %>%
 preds.df.sub.perc.plot$Region_Only<- unlist(lapply(strsplit(preds.df.sub.perc.plot$Region_Scenario, "[.]"), "[", 1))
 preds.df.sub.perc.plot$Scenario_Only<- unlist(lapply(strsplit(sub("[.]", "*", preds.df.sub.perc.plot$Region_Scenario), "[*]"), "[", 2))
 preds.df.sub.perc.plot$Model_Only<- ifelse(grepl("sdm", preds.df.sub.perc.plot$Scenario_Only), "SDM Only", 
-                                             ifelse(grepl("neva", preds.df.sub.perc.plot$Scenario_Only), "SDM + NEVA Combo", NA))
+                                           ifelse(grepl("neva", preds.df.sub.perc.plot$Scenario_Only), "SDM + NEVA Combo", NA))
 
 ## Alright, we are now after a species - scenario - season - region - mean change dataframe...
 res<- preds.df.sub.perc.plot 
@@ -3397,99 +3969,14 @@ if(FALSE){
 }
 
 
-#####
-## Change weighted by landings
-#####
-port.diffs<- read.csv("~/GitHub/COCA/Results/PortData10142018.csv")
+# Manuscript Figures — Study area map --------------------------------------
+# Spatial projections
+proj.wgs84<- CRS("+init=epsg:4326") #WGS84
+proj.utm<- CRS("+init=epsg:2960") #UTM 19
 
-port.dat.l<- port.diffs %>%
-  dplyr::filter(grepl("All", Gear)) %>%
-  group_by(., COMNAME, Port_GearType) %>%
-  summarize_if(is.double, mean, na.rm = T) %>% 
-  drop_na() 
-port.dat.l$Port.long<- gsub(".All.JGS.SAFE.PROPORTION", "", port.dat.l$Port_GearType)
-
-# Get locations
-ports.only<- data.frame(port.dat.l[!duplicated(port.dat.l$Port.long),])
-ports.only$Address<- as.character(gsub("[_]", " ", gsub("[.]", " ", tolower(ports.only$Port.long))))
-port.location<- mutate_geocode(ports.only, Address)
-port.location<- port.location %>%
-  dplyr::select(., Port.long, lon, lat)
-
-port.dat.l<- port.dat.l %>%
-  left_join(., port.location, by = "Port.long")
-
-# Need to add importance and x/y...
-landings.dat<- read.csv("~/GitHub/COCA/Data/landport1115.csv")
-
-# From this wide datafile, we want to add the value where species name matches column names of landings.dat and port name matches port row.
-column.indices<- match(gsub(" ", ".", port.dat.l$COMNAME), colnames(landings.dat))
-row.indices<- match(port.dat.l$Port.long, landings.dat$Port.long)
-landings.dat$filler<- rep(NA, nrow(landings.dat))
-
-# Adjust NA columns (no match in species name)
-column.indices[is.na(column.indices)]<- ncol(landings.dat)
-
-# Add the landings and calculate proportion of landings...by port?
-port.dat.l$landings<- as.numeric(landings.dat[cbind(row.indices, column.indices)])
-
-port.dat.weighted.diff<- port.dat.l %>%
-  dplyr::group_by(., Port.long) %>%
-  dplyr::mutate(weighted.importance = round(landings/sum(landings, na.rm = T), 3),
-                weighted.difference.p = Future_mean_diff_sdm_p*weighted.importance,
-                weighted.difference.b = Future_mean_diff_combo_b*weighted.importance) %>%
-  dplyr::select(., COMNAME, Port_GearType, lon, lat, landings, weighted.importance, weighted.difference.p, weighted.difference.b)
-
-# Write this out
-out.dir<- "~/GitHub/COCA/Results/"
-write.csv(data.frame(port.dat.weighted.diff), file = paste(out.dir, "SpeciesPortGearTypeChanges.csv"))
-
-# Calculate port specific sum
-port.aggregated.weighted.difference<- port.dat.weighted.diff %>%
-  dplyr::group_by(Port.long, lon, lat) %>%
-  dplyr::mutate(., TotalChange.P = sum(weighted.difference.p, na.rm = T),
-                TotalChange.B = sum(weighted.difference.b, na.rm = T)) %>%
-  data.frame()
-
-# Write this out and return it
-write.csv(data.frame(port.aggregated.weighted.difference), file = paste(out.dir, "PortAggregatedImportanceWeightedChange.csv"))
-
-# Plots for focal ports
-focal.ports<- c("STONINGTON.ME", "PORTLAND.ME", "NEW_BEDFORD.MA", "POINT_JUDITH.RI")
-port.imp.plot<- port.aggregated.weighted.difference %>%
-  filter(., Port.long %in% focal.ports)
-port.imp.plot<- port.imp.plot %>%
-  dplyr::select(COMNAME, Port_Long, TotalChange.P, TotalChange.B) %>%
-  gather(., "Response", "TotalChange", -COMNAME, -Port_Long)
-
-port.imp.plot.out<- ggplot(data = port.imp.plot, aes(x = Port_Long, y = TotalChange, fill = Response, group = Response)) +
-  geom_bar(stat = "identity", position = "dodge")  +
-  ylab("Proportional Landings\n Weighted Change") +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-  theme(text = element_text(size = 18))
-port.imp.plot.out.b<- ggplot(data = port.imp.plot, aes(x = Port.Name, y = TotalChange.B)) +
-  geom_bar(stat = "identity", position = "dodge")  +
-  ylab("Proportional Landings\n Weighted Change in P(presence)") +
-  theme_bw() +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)) +
-  theme(text = element_text(size = 18))
-
-png(file = paste(out.dir, "FocalPorts_AverageChangeWeightedByImp.png", sep = ""), width = 12, height = 8, units = "in", res = 250)
-plot(port.imp.plot.out)
-dev.off()
-
-
-
-
-#####
-## Matching up with Jon's designations
-#####
-#####
-## Study Area Map
-#####
 nelme<- st_read("~/GitHub/COCA/Data/NELME_clipped.shp")
 st_crs(nelme)<- "+init=epsg:4326"
+nelme.sp<- as(st_zm(nelme), "Spatial")
 
 bstrat<- st_read("~/GitHub/COCA/Data/BottomTrawlStrata/BTS_Strata.shp") %>%
   st_transform(., "+init=epsg:4326")
@@ -3500,19 +3987,23 @@ bstrat<- bstrat %>%
   filter(., !as.numeric(STRATUMA) %in% strata.ca & as.numeric(STRATUMA) <= 3990)
 
 # GoM
-gom<- st_read("~/Dropbox/Andrew/Work/GMRI/AllGIS/PhysioRegions_Maine/PhysioRegions_wgs84.shp")
+gom<- st_read("~/GitHub/COCA/Data/GoMPhysioRegions/PhysioRegions_wgs84.shp")
 st_crs(gom)<- "+init=epsg:4326"
-gom<- gom[!gom$Region == "Seamount",] %>%
-  st_union() 
+remove<- c("Bear Seamount", "Kelvin Seamount", "Manning Seamount", "Continental Slope")
+gom<- gom %>%
+  dplyr::filter(!as.character(Region) %in% remove) %>%
+  st_union()
+
+# What bottom strata polygons are inside the GoM area?
 gom.sp<- gom %>%
   st_sf()
 gom.sp<- as(st_zm(gom), "Spatial")
 gom.sp<- spTransform(gom.sp, proj.utm)
-gom.sp.wgs<-  spTransform(gom.sp, proj4string(nelme.sp))
+gom.sp.wgs<-  spTransform(gom.sp, st_crs(nelme)$proj4string)
 
 # Buffer it a bit
 gom.buff<- gBuffer(gom.sp, width = 7500)
-gom.buff<- spTransform(gom.buff, proj4string(nelme.sp))
+gom.buff<- spTransform(gom.buff, st_crs(nelme)$proj4string)
 
 # Southern regions
 south<- erase(nelme.sp, gom.buff)
@@ -3525,15 +4016,12 @@ ow<- data.frame("x" = c(-71, -71, -67, -67), "y" = c(42, 46, 46, 42))
 ow.p<- Polygon(ow)
 ow.ps<- Polygons(list(ow.p), 1)
 ow.sp<- SpatialPolygons(list(ow.ps))
-proj4string(ow.sp)<- proj4string(nelme.sp)
+proj4string(ow.sp)<- st_crs(nelme)$proj4string
 south2<- erase(south, ow.sp)
-proj4string(south2)<- proj4string(nelme.sp)
+proj4string(south2)<- st_crs(nelme)$proj4string
 south<- st_as_sf(south2)
 
 # Spatial stuff -- gets us the states and shoreline
-# Spatial projections
-proj.wgs84<- CRS("+init=epsg:4326") #WGS84
-proj.utm<- CRS("+init=epsg:2960") #UTM 19
 
 #Bounds
 xlim.use<- c(-77, -65)
@@ -3558,14 +4046,14 @@ ca.provinces.f<- fortify(ca.provinces, NAME_1)
 plot.out<- ggplot() + 
   geom_sf(data = us.states, fill = "white", lwd = 0.4, show.legend = FALSE) +
   geom_sf(data = ca.provinces.f, fill = "white", lwd = 0.4, show.legend = FALSE) +
-  geom_sf(data = bstrat, fill = "light gray", color = "black", show.legend = FALSE) +
-  geom_sf(data = gom, fill = NA, aes(color = "#377eb8"), lwd = 1.5, show.legend = TRUE) +
-  geom_sf(data = south, fill = NA, aes(color = "#ff7f00"), lwd = 1.5, show.legend = TRUE) +
-  scale_color_manual(name = "Region", values = c("#377eb8", "#ff7f00"), labels = c("Gulf of Maine", "Southern NELME")) +
+  geom_sf(data = gom, aes(fill = "#377eb8"), color = NA, alpha = 0.75, show.legend = TRUE) +
+  geom_sf(data = south, aes(fill = "#4daf4a"), color = NA, alpha = 0.75, show.legend = TRUE) +
+  geom_sf(data = bstrat, fill = NA, color = "black", show.legend = FALSE) + 
+  scale_fill_manual(name = "Region", values = c("#377eb8", "#4daf4a"), labels = c("Gulf of Maine", "Southern New England/Mid Atlantic Bight")) +
   xlim(xlim.use) +
   ylim(ylim.use) +
   theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black"))
-ggsave("~/Desktop/NormalVoting_BiomassIncPresNoExposure_09222018/StudyArea.jpg", plot.out, width = 8, height = 11)
+ggsave("~/GitHub/COCA/Results/StudyArea.jpg", plot.out, width = 8, height = 11)
 
 us.large<- gSimplify(us, tol=0.1, topologyPreserve=TRUE)
 us.large<- st_as_sf(us.large)
@@ -3581,3 +4069,665 @@ plot.large<- ggplot() +
   coord_sf(datum = NA) 
 ggsave("~/Desktop/NormalVoting_BiomassIncPresNoExposure_09222018/StudyAreaOverview.jpg", plot.large, width = 11, height = 8)
 
+
+# Manuscript Figures — Combined approach figure ---------------------------
+set.seed(1313) 
+# Sensitivity/Vulnerability
+plot <- ggplot(data = data.frame(x = c(-3, 3)), aes(x)) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1)) +
+  ylab("Density") +
+  xlab("Future Projected Relative Biomass\n Magnitude of Change") +
+  scale_y_continuous(breaks = NULL) +
+  scale_x_continuous(breaks = c(-2, -1, 0, 1, 2), labels = c("-2 SD", "-1 SD", "Mean", "+1 SD", "+2 SD")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 12), axis.title.x = element_text(size = 14)) 
+
+base.preds<- rnorm(101, mean = 0.1, sd = 1)
+base.preds.probs<- round(quantile(base.preds, c(0, 0.2, 0.4, 0.6, 0.8, 1)), 2)
+
+base.preds.labs<- data.frame("X" = as.numeric(base.preds.probs), "Y" = rep(0.5, length(base.preds.probs)), label = c("Baseline\n 0th pctl", "Baseline\n 20th pctl", "Baseline\n 40th pctl", "Baseline\n 60th pctl", "Baseline\n 80th pctl", "Baseline\n 100th pctl"))
+
+plot2<- plot + 
+  geom_vline(xintercept = base.preds.probs, lty = "dashed") +
+  geom_label(data = base.preds.labs, aes(x = X, y = Y, label = label), size = 4)
+
+exp.sens.out<- plot2 + stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1), xlim = c(-3, base.preds.labs$X[1]), geom = "area", fill = '#d7301f', alpha = .75) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1), xlim = c(base.preds.labs$X[6], 3), geom = "area", fill = '#d7301f', alpha = .75) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1), xlim = c(base.preds.labs$X[1], base.preds.labs$X[2]), geom = "area", fill = '#fc8d59', alpha = .75) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1), xlim = c(base.preds.labs$X[5], base.preds.labs$X[6]), geom = "area", fill = '#fc8d59', alpha = .75) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1), xlim = c(base.preds.labs$X[2], base.preds.labs$X[3]), geom = "area", fill = '#fdcc8a', alpha = .75) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1), xlim = c(base.preds.labs$X[4], base.preds.labs$X[5]), geom = "area", fill = '#fdcc8a', alpha = .75) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1), xlim = c(base.preds.labs$X[3], base.preds.labs$X[4]), geom = "area", fill = 'white', alpha = .75) +
+  geom_label(aes(x = -2.8, y = 0.45, label = "Very high"), size = 4, fill = '#d7301f', alpha = .6) +
+  geom_label(aes(x = 3, y = 0.45, label = "Very high"), size = 4, fill = '#d7301f', alpha = .6) +
+  geom_label(aes(x = -1.75, y = 0.45, label = "High"), size = 4, fill = '#fc8d59', alpha = .6) +
+  geom_label(aes(x = 1.75, y = 0.45, label = "High"), size = 4, fill = "#fc8d59", alpha = .6) +
+  geom_label(aes(x = -0.5, y = 0.45, label = "Moderate"), size = 4, fill = "#fdcc8a", alpha = .6) +
+  geom_label(aes(x = 0.5, y = 0.45, label = "Moderate"), size = 4, fill = "#fdcc8a", alpha = .6) +
+  geom_label(aes(x = 0, y = 0.45, label = "Low"), size = 4, fill = "white") 
+
+# Dir Effect
+plot <- ggplot(data = data.frame(x = c(-3, 3)), aes(x)) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1)) +
+  ylab("Density") +
+  xlab("Future Projected Relative Biomass\n") +
+  scale_y_continuous(breaks = NULL) +
+  scale_x_continuous(breaks = c(-2, -1, 0, 1, 2), labels = c("-2 SD", "-1 SD", "Mean", "+1 SD", "+2 SD")) +
+  theme_bw() +
+  theme(axis.text.x = element_text(size = 12), axis.title.x = element_text(size = 14)) 
+
+base.preds.probs<- round(quantile(base.preds, c(0.33, 0.67)), 2)
+
+base.preds.labs<- data.frame("X" = as.numeric(base.preds.probs), "Y" = rep(0.5, length(base.preds.probs)), label = c("Baseline\n 33rd pctl", "Baseline\n 67th pctl"))
+
+plot2<- plot + 
+  geom_vline(xintercept = base.preds.probs, lty = "dashed") +
+  geom_label(data = base.preds.labs, aes(x = X, y = Y, label = label), size = 4)
+
+dir.out<- plot2 + stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1), xlim = c(-3, base.preds.labs$X[1]), geom = "area", fill = '#0571b0', alpha = .75) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1), xlim = c(base.preds.labs$X[1], base.preds.labs$X[2]), geom = "area", fill = 'white', alpha = .75) +
+  stat_function(fun = dnorm, n = 101, args = list(mean = 0, sd = 1), xlim = c(base.preds.labs$X[2], 3), geom = "area", fill = '#ca0020', alpha = .75) +
+  geom_label(aes(x = -1.8, y = 0.45, label = "Negative"), size = 4, fill = '#0571b0', alpha = .6) +
+  geom_label(aes(x = 0.05, y = 0.45, label = "Neutral"), size = 4, fill = 'white', alpha = .6) +
+  geom_label(aes(x = 1.8, y = 0.45, label = "Positive"), size = 4, fill = '#ca0020', alpha = .6)
+
+out<- plot_grid(exp.sens.out, dir.out, ncol = 1)
+ggsave("~/Desktop/Distributions.jpg", out, width = 15, height = 15, dpi = 300)
+
+
+# Manuscript Figures — Climate model projections --------------------------------
+# What would we like to show -- sea surface temperature projected temperature changes relative to 1982-2011 and then temperature changes relative to baseline period 2011-2015
+## Some spatial stuff for data visualiztion
+# Spatial projections
+proj.wgs84<- CRS("+init=epsg:4326") #WGS84
+proj.utm<- CRS("+init=epsg:2960") #UTM 19
+
+#Bounds
+xlim.use<- c(-77, -65)
+ylim.use<- c(35.05, 45.2)
+
+states <- c("Maine", "New Hampshire", "Massachusetts", "Vermont", "New York", "Rhode Island", "Connecticut", "Delaware", "New Jersey", "Maryland", "Pennsylvania", "Virginia", "North Carolina", "South Carolina", "Georgia", "Florida", "District of Columbia", "West Virgina")
+provinces <- c("Ontario", "Québec", "Nova Scotia", "New Brunswick")
+
+us <- raster::getData("GADM",country="USA",level=1)
+us.states <- us[us$NAME_1 %in% states,]
+us.states <- gSimplify(us.states, tol = 0.075, topologyPreserve = TRUE)
+canada <- raster::getData("GADM",country="CAN",level=1)
+ca.provinces <- canada[canada$NAME_1 %in% provinces,]
+ca.provinces <- gSimplify(ca.provinces, tol = 0.075, topologyPreserve = TRUE)
+
+us.states.f<- fortify(us.states, NAME_1)
+ca.provinces.f<- fortify(ca.provinces, NAME_1)
+
+### Applying anomalies -- mean
+## Inspect the file using the ncdf4 libaray
+## Get sst anomaly 
+sst.anom.temp<- raster::stack("~/GitHub/COCA/Data/SST.CMIP5.1982-2099.anom.nc", varname = "sstanom")
+sst.anom<- raster::rotate(sst.anom.temp)
+
+## Get oisst data
+oisst.dat.temp<- raster::stack("~/Dropbox/Andrew/Work/GMRI/Projects/AllData/EC_sst_1981_2015_OISST-V2-AVHRR_agg_combined.nc")
+oisst.dat<- raster::rotate(oisst.dat.temp)
+
+# Need to get climatology from the OISST data -- set up OISST stack as time series
+oisst.min<- gsub("X", "", min(names(oisst.dat)))
+oisst.min.date<- as.Date(gsub("[.]", "-", oisst.min))
+oisst.max<- gsub("X", "", max(names(oisst.dat)))
+oisst.max.date<- as.Date(gsub("[.]", "-", oisst.max))
+
+# Calculate monthly mean temperature -- this would be compared to the sstclim data (monthly climate ensemble)
+oisst.dates<- seq.Date(from = oisst.min.date, to = oisst.max.date, by = "day")
+oisst.dat<- setZ(oisst.dat, oisst.dates)
+
+# Aggregate daily to monthly data
+oisst.monthly <- zApply(oisst.dat, by = as.yearmon, mean)
+
+# Lets check that
+test.dat<- subset(oisst.dat, which(getZ(oisst.dat) >="1981-09-01" & getZ(oisst.dat) <= "1981-09-30"))
+sept1981.mu<- calc(test.dat, mean)
+plot(oisst.monthly[[1]]-sept1981.mu)
+
+# Everything seems fine there, now need the monthly average for each month across baseline years (1982-2011)
+dates<- getZ(oisst.monthly)
+subset.vec<- which(dates > "Dec 1981" & dates < "Jan 2012", arr.ind = TRUE)
+oisst.monthly.sub<- oisst.monthly[[subset.vec]]
+oisst.monthly.sub<- setZ(oisst.monthly.sub, dates[subset.vec])
+
+oisst.clim<- stack()
+months<- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+for(i in seq_along(months)) {
+  # Get all the monthly raster
+  stack.temp<- subset(oisst.monthly.sub, which(grepl(months[i], names(oisst.monthly.sub))))
+  month.clim<- calc(stack.temp, fun = mean)
+  oisst.clim<- stack(oisst.clim, month.clim)
+  names(oisst.clim)[i]<- months[i]
+}
+
+# Check that
+test.dat<- subset(oisst.monthly.sub, which(grepl("Jan", names(oisst.monthly.sub))))
+jan.mu<- calc(test.dat, mean)
+summary(oisst.clim[[1]] - jan.mu)
+
+# Looks good -- time to apply the anomalies to the oisst.clim
+oisst.clim.coarse<- raster::resample(oisst.clim, sst.anom)
+names(oisst.clim.coarse)<- c("01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12")
+
+# Okay, now good to apply the anomalies from the climate models to climatology and get raw values
+sst.model<- stack()
+
+for(i in 1:nlayers(sst.anom)) {
+  index.match<- which(gsub("X", "", names(oisst.clim.coarse)) == unlist(strsplit(names(sst.anom)[i], "[.]"))[2])
+  rast.temp<- oisst.clim.coarse[[index.match]] + sst.anom[[i]]
+  sst.model<- stack(sst.model, rast.temp)
+  names(sst.model)[i]<- names(sst.anom)[i]
+}
+
+# One more step, need to fill in the missing coastline raster cell values.... Function below, i is corresponding to a three by three window
+fill.na <- function(x, i=5) {
+  if( is.na(x)[i] ) {
+    return( round(mean(x, na.rm=TRUE),0) )
+  } else {
+    return( round(x[i],0) )
+  }
+}  
+
+# Now apply that function to each raster stack
+for(i in 1:nlayers(sst.model)) {
+  new.rast<- focal(sst.model[[i]], w = matrix(1, 3, 3), fun = fill.na, pad = TRUE, na.rm = FALSE)
+  sst.model[[i]]<- new.rast
+}
+
+sst.model.proj<- projectRaster(sst.model, crs = proj.utm)
+names(sst.model.proj)<- names(sst.anom)
+sst.model<- projectRaster(sst.model.proj, crs = proj.wgs84)
+
+# Okay....now can we get some season and regional averages? Would want to show NES LME, and then GoM vs. SNE changes in spring and fall...
+# NELME domain
+nelme<- st_read("~/GitHub/COCA/Data/NELME_clipped.shp")
+st_crs(nelme)<- "+init=epsg:4326"
+nelme.sp<- as(st_zm(nelme), "Spatial")
+proj4string(nelme.sp)<- st_crs(nelme)$proj4string
+
+gom<- st_read("~/GitHub/COCA/Data/GoMPhysioRegions/PhysioRegions_WGS84.shp")
+st_crs(gom)<- "+init=epsg:4326"
+gom<- gom[!grepl("Seamount", gom$Region),] %>%
+  st_union() %>%
+  st_sf()
+gom.sp<- as(st_zm(gom), "Spatial")
+gom.sp<- spTransform(gom.sp, proj.utm)
+gom.sp.wgs<-  spTransform(gom.sp, st_crs(nelme)$proj4string)
+
+# Buffer it a bit
+gom.buff<- gBuffer(gom.sp, width = 7500)
+gom.buff<- spTransform(gom.buff, st_crs(nelme)$proj4string)
+
+# Southern regions
+south<- erase(nelme.sp, gom.buff)
+
+# Still a bit remaining...custom box to get rid of the rest of it
+# Coordinates
+ow<- data.frame("x" = c(-71, -71, -67, -67), "y" = c(42, 46, 46, 42))
+
+# Convert coordinates to Spatial Polygons
+ow.p<- Polygon(ow)
+ow.ps<- Polygons(list(ow.p), 1)
+ow.sp<- SpatialPolygons(list(ow.ps))
+proj4string(ow.sp)<- st_crs(nelme)$proj4string
+south2<- erase(south, ow.sp)
+proj4string(south2)<- st_crs(nelme)$proj4string
+
+nelme.sst<- raster::extract(sst.model, nelme, fun = mean)
+south.sst<- raster::extract(sst.model, south2, fun = mean)
+gom2<- erase(nelme.sp, south2)
+gom.sst<- raster::extract(sst.model, gom2, fun = mean)
+
+# Now --- want to get the average value by date and plot the time series
+sst.mn<- data.frame("Date" = rep(gsub("X", "", dimnames(nelme.sst)[[2]]), 3), "Region" = c(rep("NES LME", length(dimnames(nelme.sst)[[2]])), rep("GoM", length(dimnames(nelme.sst)[[2]])), rep("Southern NES LME", length(dimnames(nelme.sst)[[2]]))), "SST" = c(as.numeric(nelme.sst), as.numeric(gom.sst), as.numeric(south.sst)))
+sst.mn$Date<- as.Date(gsub("[.]", "-", sst.mn$Date))
+sst.mn$Month<- as.numeric(format(sst.mn$Date, "%m"))
+sst.mn$Year<- as.numeric(format(sst.mn$Date, "%Y"))
+sst.mn$Season<- ifelse(sst.mn$Month >= 3 & sst.mn$Month <= 5, "SPRING", 
+                       ifelse(sst.mn$Month >= 9 & sst.mn$Month <= 11, "FALL", NA))
+
+
+## Inspect the file using the ncdf4 libaray
+## Get sst anomaly 
+sst.anom.temp<- raster::stack("~/GitHub/COCA/Data/SST.CMIP5.1982-2099.anom.nc", varname = "sstpct05")
+sst.anom<- raster::rotate(sst.anom.temp)
+
+## Get oisst data
+oisst.dat.temp<- raster::stack("~/Dropbox/Andrew/Work/GMRI/Projects/AllData/EC_sst_1981_2015_OISST-V2-AVHRR_agg_combined.nc")
+oisst.dat<- raster::rotate(oisst.dat.temp)
+
+# Need to get climatology from the OISST data -- set up OISST stack as time series
+oisst.min<- gsub("X", "", min(names(oisst.dat)))
+oisst.min.date<- as.Date(gsub("[.]", "-", oisst.min))
+oisst.max<- gsub("X", "", max(names(oisst.dat)))
+oisst.max.date<- as.Date(gsub("[.]", "-", oisst.max))
+
+# Calculate monthly mean temperature -- this would be compared to the sstclim data (monthly climate ensemble)
+oisst.dates<- seq.Date(from = oisst.min.date, to = oisst.max.date, by = "day")
+oisst.dat<- setZ(oisst.dat, oisst.dates)
+
+# Aggregate daily to monthly data
+oisst.monthly <- zApply(oisst.dat, by = as.yearmon, mean)
+
+# Lets check that
+test.dat<- subset(oisst.dat, which(getZ(oisst.dat) >="1981-09-01" & getZ(oisst.dat) <= "1981-09-30"))
+sept1981.mu<- calc(test.dat, mean)
+plot(oisst.monthly[[1]]-sept1981.mu)
+
+# Everything seems fine there, now need the monthly average for each month across baseline years (1982-2011)
+dates<- getZ(oisst.monthly)
+subset.vec<- which(dates > "Dec 1981" & dates < "Jan 2012", arr.ind = TRUE)
+oisst.monthly.sub<- oisst.monthly[[subset.vec]]
+oisst.monthly.sub<- setZ(oisst.monthly.sub, dates[subset.vec])
+
+oisst.clim<- stack()
+months<- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+for(i in seq_along(months)) {
+  # Get all the monthly raster
+  stack.temp<- subset(oisst.monthly.sub, which(grepl(months[i], names(oisst.monthly.sub))))
+  month.clim<- calc(stack.temp, fun = mean)
+  oisst.clim<- stack(oisst.clim, month.clim)
+  names(oisst.clim)[i]<- months[i]
+}
+
+# Check that
+test.dat<- subset(oisst.monthly.sub, which(grepl("Jan", names(oisst.monthly.sub))))
+jan.mu<- calc(test.dat, mean)
+summary(oisst.clim[[1]] - jan.mu)
+
+# Looks good -- time to apply the anomalies to the oisst.clim
+oisst.clim.coarse<- raster::resample(oisst.clim, sst.anom)
+names(oisst.clim.coarse)<- c("01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12")
+
+# Okay, now good to apply the anomalies from the climate models to climatology and get raw values
+sst.model<- stack()
+
+for(i in 1:nlayers(sst.anom)) {
+  index.match<- which(gsub("X", "", names(oisst.clim.coarse)) == unlist(strsplit(names(sst.anom)[i], "[.]"))[2])
+  rast.temp<- oisst.clim.coarse[[index.match]] + sst.anom[[i]]
+  sst.model<- stack(sst.model, rast.temp)
+  names(sst.model)[i]<- names(sst.anom)[i]
+}
+
+# One more step, need to fill in the missing coastline raster cell values.... Function below, i is corresponding to a three by three window
+fill.na <- function(x, i=5) {
+  if( is.na(x)[i] ) {
+    return( round(mean(x, na.rm=TRUE),0) )
+  } else {
+    return( round(x[i],0) )
+  }
+}  
+
+# Now apply that function to each raster stack
+for(i in 1:nlayers(sst.model)) {
+  new.rast<- focal(sst.model[[i]], w = matrix(1, 3, 3), fun = fill.na, pad = TRUE, na.rm = FALSE)
+  sst.model[[i]]<- new.rast
+}
+
+sst.model.proj<- projectRaster(sst.model, crs = proj.utm)
+names(sst.model.proj)<- names(sst.anom)
+sst.model<- projectRaster(sst.model.proj, crs = proj.wgs84)
+
+# Okay....now can we get some season and regional averages? Would want to show NES LME, and then GoM vs. SNE changes in spring and fall...
+# NELME domain
+nelme<- st_read("~/GitHub/COCA/Data/NELME_clipped.shp")
+st_crs(nelme)<- "+init=epsg:4326"
+nelme.sp<- as(st_zm(nelme), "Spatial")
+proj4string(nelme.sp)<- st_crs(nelme)$proj4string
+
+gom<- st_read("~/GitHub/COCA/Data/GoMPhysioRegions/PhysioRegions_WGS84.shp")
+st_crs(gom)<- "+init=epsg:4326"
+gom<- gom[!grepl("Seamount", gom$Region),] %>%
+  st_union() %>%
+  st_sf()
+gom.sp<- as(st_zm(gom), "Spatial")
+gom.sp<- spTransform(gom.sp, proj.utm)
+gom.sp.wgs<-  spTransform(gom.sp, st_crs(nelme)$proj4string)
+
+# Buffer it a bit
+gom.buff<- gBuffer(gom.sp, width = 7500)
+gom.buff<- spTransform(gom.buff, st_crs(nelme)$proj4string)
+
+# Southern regions
+south<- erase(nelme.sp, gom.buff)
+
+# Still a bit remaining...custom box to get rid of the rest of it
+# Coordinates
+ow<- data.frame("x" = c(-71, -71, -67, -67), "y" = c(42, 46, 46, 42))
+
+# Convert coordinates to Spatial Polygons
+ow.p<- Polygon(ow)
+ow.ps<- Polygons(list(ow.p), 1)
+ow.sp<- SpatialPolygons(list(ow.ps))
+proj4string(ow.sp)<- st_crs(nelme)$proj4string
+south2<- erase(south, ow.sp)
+proj4string(south2)<- st_crs(nelme)$proj4string
+
+nelme.sst<- raster::extract(sst.model, nelme, fun = mean)
+south.sst<- raster::extract(sst.model, south2, fun = mean)
+gom2<- erase(nelme.sp, south2)
+gom.sst<- raster::extract(sst.model, gom2, fun = mean)
+
+# Now --- want to get the average value by date and plot the time series
+sst.pct05<- data.frame("Date" = rep(gsub("X", "", dimnames(nelme.sst)[[2]]), 3), "Region" = c(rep("NES LME", length(dimnames(nelme.sst)[[2]])), rep("GoM", length(dimnames(nelme.sst)[[2]])), rep("Southern NES LME", length(dimnames(nelme.sst)[[2]]))), "SST.05" = c(as.numeric(nelme.sst), as.numeric(gom.sst), as.numeric(south.sst)))
+sst.pct05$Date<- as.Date(gsub("[.]", "-", sst.pct05$Date))
+sst.pct05$Month<- as.numeric(format(sst.pct05$Date, "%m"))
+sst.pct05$Year<- as.numeric(format(sst.pct05$Date, "%Y"))
+sst.pct05$Season<- ifelse(sst.pct05$Month >= 3 & sst.pct05$Month <= 5, "SPRING", 
+                          ifelse(sst.pct05$Month >= 9 & sst.pct05$Month <= 11, "FALL", NA))
+
+## Inspect the file using the ncdf4 libaray
+## Get sst anomaly 
+sst.anom.temp<- raster::stack("~/GitHub/COCA/Data/SST.CMIP5.1982-2099.anom.nc", varname = "sstpct95")
+sst.anom<- raster::rotate(sst.anom.temp)
+
+## Get oisst data
+oisst.dat.temp<- raster::stack("~/Dropbox/Andrew/Work/GMRI/Projects/AllData/EC_sst_1981_2015_OISST-V2-AVHRR_agg_combined.nc")
+oisst.dat<- raster::rotate(oisst.dat.temp)
+
+# Need to get climatology from the OISST data -- set up OISST stack as time series
+oisst.min<- gsub("X", "", min(names(oisst.dat)))
+oisst.min.date<- as.Date(gsub("[.]", "-", oisst.min))
+oisst.max<- gsub("X", "", max(names(oisst.dat)))
+oisst.max.date<- as.Date(gsub("[.]", "-", oisst.max))
+
+# Calculate monthly mean temperature -- this would be compared to the sstclim data (monthly climate ensemble)
+oisst.dates<- seq.Date(from = oisst.min.date, to = oisst.max.date, by = "day")
+oisst.dat<- setZ(oisst.dat, oisst.dates)
+
+# Aggregate daily to monthly data
+oisst.monthly <- zApply(oisst.dat, by = as.yearmon, mean)
+
+# Lets check that
+test.dat<- subset(oisst.dat, which(getZ(oisst.dat) >="1981-09-01" & getZ(oisst.dat) <= "1981-09-30"))
+sept1981.mu<- calc(test.dat, mean)
+plot(oisst.monthly[[1]]-sept1981.mu)
+
+# Everything seems fine there, now need the monthly average for each month across baseline years (1982-2011)
+dates<- getZ(oisst.monthly)
+subset.vec<- which(dates > "Dec 1981" & dates < "Jan 2012", arr.ind = TRUE)
+oisst.monthly.sub<- oisst.monthly[[subset.vec]]
+oisst.monthly.sub<- setZ(oisst.monthly.sub, dates[subset.vec])
+
+oisst.clim<- stack()
+months<- c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+for(i in seq_along(months)) {
+  # Get all the monthly raster
+  stack.temp<- subset(oisst.monthly.sub, which(grepl(months[i], names(oisst.monthly.sub))))
+  month.clim<- calc(stack.temp, fun = mean)
+  oisst.clim<- stack(oisst.clim, month.clim)
+  names(oisst.clim)[i]<- months[i]
+}
+
+# Check that
+test.dat<- subset(oisst.monthly.sub, which(grepl("Jan", names(oisst.monthly.sub))))
+jan.mu<- calc(test.dat, mean)
+summary(oisst.clim[[1]] - jan.mu)
+
+# Looks good -- time to apply the anomalies to the oisst.clim
+oisst.clim.coarse<- raster::resample(oisst.clim, sst.anom)
+names(oisst.clim.coarse)<- c("01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12")
+
+# Okay, now good to apply the anomalies from the climate models to climatology and get raw values
+sst.model<- stack()
+
+for(i in 1:nlayers(sst.anom)) {
+  index.match<- which(gsub("X", "", names(oisst.clim.coarse)) == unlist(strsplit(names(sst.anom)[i], "[.]"))[2])
+  rast.temp<- oisst.clim.coarse[[index.match]] + sst.anom[[i]]
+  sst.model<- stack(sst.model, rast.temp)
+  names(sst.model)[i]<- names(sst.anom)[i]
+}
+
+# One more step, need to fill in the missing coastline raster cell values.... Function below, i is corresponding to a three by three window
+fill.na <- function(x, i=5) {
+  if( is.na(x)[i] ) {
+    return( round(mean(x, na.rm=TRUE),0) )
+  } else {
+    return( round(x[i],0) )
+  }
+}  
+
+# Now apply that function to each raster stack
+for(i in 1:nlayers(sst.model)) {
+  new.rast<- focal(sst.model[[i]], w = matrix(1, 3, 3), fun = fill.na, pad = TRUE, na.rm = FALSE)
+  sst.model[[i]]<- new.rast
+}
+
+sst.model.proj<- projectRaster(sst.model, crs = proj.utm)
+names(sst.model.proj)<- names(sst.anom)
+sst.model<- projectRaster(sst.model.proj, crs = proj.wgs84)
+
+# Okay....now can we get some season and regional averages? Would want to show NES LME, and then GoM vs. SNE changes in spring and fall...
+# NELME domain
+nelme<- st_read("~/GitHub/COCA/Data/NELME_clipped.shp")
+st_crs(nelme)<- "+init=epsg:4326"
+nelme.sp<- as(st_zm(nelme), "Spatial")
+proj4string(nelme.sp)<- st_crs(nelme)$proj4string
+
+gom<- st_read("~/GitHub/COCA/Data/GoMPhysioRegions/PhysioRegions_WGS84.shp")
+st_crs(gom)<- "+init=epsg:4326"
+gom<- gom[!grepl("Seamount", gom$Region),] %>%
+  st_union() %>%
+  st_sf()
+gom.sp<- as(st_zm(gom), "Spatial")
+gom.sp<- spTransform(gom.sp, proj.utm)
+gom.sp.wgs<-  spTransform(gom.sp, st_crs(nelme)$proj4string)
+
+# Buffer it a bit
+gom.buff<- gBuffer(gom.sp, width = 7500)
+gom.buff<- spTransform(gom.buff, st_crs(nelme)$proj4string)
+
+# Southern regions
+south<- erase(nelme.sp, gom.buff)
+
+# Still a bit remaining...custom box to get rid of the rest of it
+# Coordinates
+ow<- data.frame("x" = c(-71, -71, -67, -67), "y" = c(42, 46, 46, 42))
+
+# Convert coordinates to Spatial Polygons
+ow.p<- Polygon(ow)
+ow.ps<- Polygons(list(ow.p), 1)
+ow.sp<- SpatialPolygons(list(ow.ps))
+proj4string(ow.sp)<- st_crs(nelme)$proj4string
+south2<- erase(south, ow.sp)
+proj4string(south2)<- st_crs(nelme)$proj4string
+
+nelme.sst<- raster::extract(sst.model, nelme, fun = mean)
+south.sst<- raster::extract(sst.model, south2, fun = mean)
+gom2<- erase(nelme.sp, south2)
+gom.sst<- raster::extract(sst.model, gom2, fun = mean)
+
+# Now --- want to get the average value by date and plot the time series
+sst.pct95<- data.frame("Date" = rep(gsub("X", "", dimnames(nelme.sst)[[2]]), 3), "Region" = c(rep("NES LME", length(dimnames(nelme.sst)[[2]])), rep("GoM", length(dimnames(nelme.sst)[[2]])), rep("Southern NES LME", length(dimnames(nelme.sst)[[2]]))), "SST.95" = c(as.numeric(nelme.sst), as.numeric(gom.sst), as.numeric(south.sst)))
+sst.pct95$Date<- as.Date(gsub("[.]", "-", sst.pct95$Date))
+sst.pct95$Month<- as.numeric(format(sst.pct95$Date, "%m"))
+sst.pct95$Year<- as.numeric(format(sst.pct95$Date, "%Y"))
+sst.pct95$Season<- ifelse(sst.pct95$Month >= 3 & sst.pct95$Month <= 5, "SPRING", 
+                          ifelse(sst.pct95$Month >= 9 & sst.pct95$Month <= 11, "FALL", NA))
+colnames(sst.pct95)[3]<- "SST.95"
+
+# Merge em all together?
+sst.all<- sst.mn %>%
+  left_join(., sst.pct05) %>%
+  left_join(., sst.pct95) %>%
+  drop_na(Season)
+
+# Fit linear model for trends
+# linear model function
+lm.fun <- function(df){
+  df.mod<- df %>%
+    group_by(Year) %>%
+    summarize_at("SST", mean)
+  mod.out<- lm(SST ~ Year, data = df.mod)
+  return(mod.out)
+}
+
+sst.all.mod<- sst.all %>%
+  group_by(Season, Region) %>%
+  nest() %>%
+  mutate(., "Linear.Model" = map(data, lm.fun),
+         "Tidied" = map(Linear.Model, tidy),
+         "Glanced" = map(Linear.Model, glance),
+         "Augmented" = map(Linear.Model, augment))
+
+# Fits
+sst.all.mod %>%
+  unnest(Tidied)
+
+sst.all.mod %>%
+  unnest(Glanced)
+
+# Diffs to Kleisner
+kleisner<- data.frame("Season" = c("FALL", "SPRING", "FALL", "SPRING", "FALL", "SPRING"), "Region" = c("NES LME", "NES LME", "GoM", "GoM", "Southern NES LME", "Southern NES LME"), "term" = rep("Year", 6), "estimate.k" = c(0.049, 0.048, 0.053, 0.052, 0.047, 0.047))
+us<- sst.all.mod %>%
+  unnest(Tidied)
+us<- us[c(FALSE, TRUE),]
+sst.comparison<- us %>%
+  left_join(., kleisner) %>%
+  mutate(., "SST.Trend.Diff" = estimate.k - estimate)
+
+summary(sst.comparison$SST.Trend.Diff)
+# Plot
+sst.yrly<- sst.all %>%
+  group_by(Season, Region, Year) %>%
+  summarize_at(c("SST", "SST.05", "SST.95"), mean)
+
+sst.base<- sst.yrly %>%
+  filter(., Year >= 1982 & Year <= 2011) %>%
+  group_by(Season, Region) %>%
+  summarize_at(c("SST"), mean)
+colnames(sst.base)[3]<- "SST.Base"
+
+sst.plot<- sst.yrly %>%
+  left_join(., sst.base)
+sst.plot<- sst.plot %>%
+  mutate(., "Anomaly.Mean" = SST - SST.Base,
+         "Anomaly.5th" = SST.05 - SST.Base,
+         "Anomaly.95th" = SST.95 - SST.Base)
+sst.plot$Region<- factor(sst.plot$Region, levels = c("NES LME", "GoM", "Southern NES LME"), labels = c("Northeast Shelf Large Marine Ecosystem", "Gulf of Maine", "Southern New England/Mid Atlantic Bight"))
+sst.plot$Season<- factor(sst.plot$Season, levels = c("FALL", "SPRING"), labels = c("Fall", "Spring"))
+
+clim.sst.plot<- ggplot() + 
+  geom_vline(xintercept = 2050, size = 2) +
+  geom_line(data = sst.plot, aes(x = Year, y = Anomaly.Mean, color = Region)) +
+  geom_ribbon(data = sst.plot, aes(x = Year, ymin = Anomaly.5th, ymax = Anomaly.95th, fill = Region), alpha=0.15) +
+  scale_color_manual(name = "Region", values = c("black", '#377eb8', '#4daf4a')) +
+  scale_fill_manual(name = "Region", values = c("black", '#377eb8', '#4daf4a')) +
+  labs(x = "Year", y = "RCP 8.5 Models Ensemble Projected SST Anomaly\n Relative to 21982-2011 Climatology", fill = "Region") +
+  facet_wrap(~Season) +
+  theme(strip.background = element_blank())
+ggsave("~/GitHub/COCA/Results/ClimateModelSSTAnomaly.jpg", clim.sst.plot, width = 11, height = 8)
+
+# Add observed temperature anomalies?
+oisst.dat.temp<- raster::stack("~/Dropbox/Andrew/Work/GMRI/Projects/AllData/EC_sst_1981_2015_OISST-V2-AVHRR_agg_combined.nc")
+oisst.dat<- raster::rotate(oisst.dat.temp)
+
+# Need to get climatology from the OISST data -- set up OISST stack as time series
+oisst.min<- gsub("X", "", min(names(oisst.dat)))
+oisst.min.date<- as.Date(gsub("[.]", "-", oisst.min))
+oisst.max<- gsub("X", "", max(names(oisst.dat)))
+oisst.max.date<- as.Date(gsub("[.]", "-", oisst.max))
+
+# Libraries
+library(rts)
+
+# Preliminaries
+month.conv<- data.frame("Month.Chr" = c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"), "Month.Num" = c("01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11", "12"))
+
+baseline.period = c("1982-01-01", "2011-12-31")
+oisst.dates<- seq.Date(from = oisst.min.date, to = oisst.max.date, by = "day")
+oisst.dat<- setZ(oisst.dat, oisst.dates)
+
+## Baseline
+## Need baseline daily average temp across years for every day
+dates.unique<- unique(format(getZ(oisst.dat), "%m-%d"))
+daily.means<- stack(lapply(seq(length(dates.unique)), function(x) calc(oisst.dat[[which(grepl(dates.unique[x], getZ(oisst.dat)) == TRUE)]], fun = mean)))
+names(daily.means)<- dates.unique
+daily.sd<- stack(lapply(seq(length(dates.unique)), function(x) calc(oisst.dat[[which(grepl(dates.unique[x], getZ(oisst.dat)) == TRUE)]], fun = sd)))
+names(daily.sd)<- dates.unique
+
+# Alright, now substract each day from the average to get the anomaly
+daily.anoms<- stack(lapply(seq(1:nlayers(oisst.dat)), function(x) (oisst.dat[[x]] - daily.means[[match(format(getZ(oisst.dat)[x], "%m-%d"), gsub("[.]", "-", gsub("X", "", names(daily.means))))]])/daily.sd[[match(format(getZ(oisst.dat)[x], "%m-%d"), gsub("[.]", "-", gsub("X", "", names(daily.sd))))]]))
+
+## Get the data ready for plotting
+# Smoothing
+daily.anoms<- setZ(daily.anoms, oisst.dates)
+names(daily.anoms)<- oisst.dates
+ts.wide.daily<- do.call("cbind", lapply(seq(1:nlayers(daily.anoms)), function(x) as.data.frame(daily.anoms[[x]], xy = TRUE)))
+ts.df.daily<- ts.wide.daily %>%
+  subset(., select=which(!duplicated(names(.)))) %>%
+  gather(., Year, SST, -x, -y) 
+
+ts.df.daily$Year<- gsub("[.]", "-", gsub("X", "", ts.df.daily$Year))
+ts.df.dailymu<- ts.df.daily %>%
+  group_by(Year) %>%
+  summarize(., Mean.SST = mean(SST, na.rm = T)) %>%
+  separate(., col = Year, into = c("Year", "Month", "Day"), sep = "-") %>%
+  mutate(., Plot.Date = as.Date(paste(Year, Month, Day, sep = "-"))) %>%
+  data.frame
+
+ts.df.dailymu$Season<- ifelse(ts.df.dailymu$Month %in% c("03", "04", "05"), "Spring",
+                              ifelse(ts.df.dailymu$Month %in% c("09", "10", "11"), "Fall", NA))
+
+ts.df.yearlymu<- ts.df.dailymu %>%
+  group_by(Year, Season) %>%
+  summarize(., 
+            "Anomaly.Mean" = mean(Mean.SST, na.rm = T)) %>%
+  drop_na(Season)
+ts.df.yearlymu$Season<- factor(ts.df.yearlymu$Season, levels = c("Fall", "Spring"))
+ts.df.yearlymu$Year<- as.numeric(ts.df.yearlymu$Year)
+
+clim.sst.plot.out<- clim.sst.plot +
+  geom_point(data = ts.df.yearlymu, aes(x = Year, y = Anomaly.Mean), pch = 21, color = "black", size = 1) +
+  geom_line(data = ts.df.yearlymu, aes(x = Year, y = Anomaly.Mean), linetype = "dotted")
+ggsave("~/GitHub/COCA/Results/ClimateModelSSTAnomaly.jpg", clim.sst.plot.out, width = 11, height = 8)
+
+
+# Manuscript Figures — Lobster used temperatures --------------------------
+dat.lob<- dat %>%
+  filter(., COMNAME == "AMERICAN LOBSTER")
+
+dat.lob.k<- dat.lob %>%
+  filter(., EST_YEAR >= 1982 & EST_YEAR <= 2013)
+dat.lob.k$SEASON<- rep("Combined", nrow(dat.lob.k))
+
+dat.lob.us<- dat.lob %>%
+  filter(., EST_YEAR >= 1982 & EST_YEAR <= 2011)
+
+lob.us<- ggplot(dat.lob.us) +
+  geom_density(aes(x = SEASONALMU.OISST, group = SEASON, linetype = SEASON)) +
+  geom_hline(yintercept = 0, color = "white", lwd = 1) +
+  ylab("Density") + 
+  xlab(expression("Seasonal sea surface temperature ("*{}^{o}*"C)")) +
+  scale_linetype_manual(name = "Season", values = c("dashed", "dotted"))
+
+lob.both<- lob.us +
+  geom_density(data = dat.lob.k, aes(x = SEASONALMU.OISST, linetype = SEASON)) +
+  geom_hline(yintercept = 0, color = "white", lwd = 1) +
+  scale_linetype_manual(name = "Season", values = c("solid", "dotted", "dashed"))
+
+sst.out<- lob.both
+
+lob.us<- ggplot(dat.lob.us) +
+  geom_density(aes(x = BOTTEMP, group = SEASON, linetype = SEASON)) +
+  geom_hline(yintercept = 0, color = "white", lwd = 1) +
+  ylab("Density") + 
+  xlab(expression("In situ bottom temperature ("*{}^{o}*"C)")) +
+  scale_linetype_manual(name = "Season", values = c("dashed", "dotted"))
+
+lob.both<- lob.us +
+  geom_density(data = dat.lob.k, aes(x = BOTTEMP, linetype = SEASON)) +
+  geom_hline(yintercept = 0, color = "white", lwd = 1) +
+  scale_linetype_manual(name = "Season", values = c("solid", "dotted", "dashed"))
+
+bot.out<- lob.both
+
+out<- plot_grid(sst.out, bot.out, labels = c("American lobster used\n sea surface temperatures", "American lobster used\n bottom temperatures"), nrow = 1)
+out.path<- "~/GitHub/COCA/Results/"
+ggsave(paste(out.path, "LobsterTemperaturePlots.jpg", sep = ""), out, width = 11, height = 8, units = "in")
