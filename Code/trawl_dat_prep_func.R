@@ -1,19 +1,43 @@
-########## A function to converting raw NOAA NEFSC bottom trawl survey data provided by J. Nye to a dataset ready for modeling ##########
+#####
+## Functions for processing NOAA NEFSC bottom trawl survey data 
+#####
 
-trawl_dat_prep<- function(survdat.file = "Survdat_Nye2016.RData", sst.nc = "EC_sst_1981_2015_OISST-V2-AVHRR_agg_combined.nc") {
-  # Details -----------------------------------------------------------
-  # The function reads in an .RData file of NOAA NEFSC bottom trawl survey data and then makes some modifications to produce a datafile ready for fitting with SDM, such that for every tow there is a record of every species (presence, log(biomass+1) given presence) and seasonal SST average and bottom depth. Seasonal SST averages are calculated from the supplied .nc OISST time series file. After cleaning the raw data and collecting the predictor variables, the function saves the model ready file as "model.dat.rds."
+# Helper Function ---------------------------------------------------------
+library_check<- function(libraries) {
+  ## Details
+  # This function will check for and then either load or install any libraries needed to run subsequent functions
   
-  #########
-  ## Start
-  #########
+  # Args:
+  # libraries = Vector of required library names
+  
+  # Returns: NA, just downloads/loads libraries into current work space.
+  
+  ## Start function
+  lapply(libraries, FUN = function(x) {
+    if (!require(x, character.only = TRUE)) {
+      install.packages(x, dependencies = TRUE)
+      library(x, character.only = TRUE)
+    }
+  })
+  ## End function
+}
+
+trawl_dat_prep<- function(survdat.file = "~/Volumes/Shared/Research/MillsLab/NMFS Trawl Data/Survdat_Nye_allseason.RData", sst = "~/Volumes/Shared/Research/MillsLab/SST/RawData/OISST.grd", out.path = "./Data/") {
+  ## Details
+  # This function reads in an .RData file of NOAA NEFSC bottom trawl survey data and then makes some modifications to produce a datafile ready for fitting with SDM, such that for every tow there is a record of every species (presence, log(biomass+1) given presence) and seasonal SST average and bottom depth. Seasonal SST averages are calculated from the supplied .nc OISST time series file. After cleaning the raw data and collecting the predictor variables, the function saves the model ready file as "model.dat.rds."
+  
+  # Args:
+  # survdat.file = Path to survey data file 
+  # sst = Path to sea surface temperature data, hosted on the shared drive
+  # out.path = Path to save processsed rds data file
+  
+  # Returns: RDS Data file, which is also saved in folder specified by out.path
+  
+  ## Start function
   # Preliminaries -----------------------------------------------------------
-  # Source helper functions
-  source("./Code/HelperFunctions.R")
-  
   # Load libraries, using package_check to download if it is missing
-  packages.needed<- c("tidyverse", "sp", "raster", "geosphere")
-  package_check(packages.needed)
+  libraries.needed<- c("tidyverse", "sp", "raster", "geosphere")
+  library_check(libraries.needed)
   
   # Load in the data
   load(paste("./Data/", survdat.file, sep = ""))
