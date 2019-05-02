@@ -9,6 +9,8 @@ library(maptools)
 library(ggplot2)
 library(tidyverse)
 library(rgeos)
+library(zoo)
+library(viridis)
 
 ## Some spatial stuff for data visualiztion
 # Spatial projections
@@ -41,7 +43,7 @@ sst.anom.temp<- raster::stack("~/GitHub/COCA/Data/SST.CMIP5.1982-2099.anom.nc", 
 sst.anom<- raster::rotate(sst.anom.temp)
 
 ## Get oisst data
-oisst.dat.temp<- raster::stack("~/Dropbox/Andrew/Work/GMRI/AllData/EC_sst_1981_2015_OISST-V2-AVHRR_agg_combined.nc")
+oisst.dat.temp<- raster::stack("~/Dropbox/Andrew/Work/GMRI/Projects/AllData/EC_sst_1981_2015_OISST-V2-AVHRR_agg_combined.nc")
 oisst.dat<- raster::rotate(oisst.dat.temp)
 
 # Need to get climatology from the OISST data -- set up OISST stack as time series
@@ -152,6 +154,9 @@ ggplot() +
   theme(panel.background = element_rect(fill = "white", color = "black"), panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(fill="white", color = "black")) +
   facet_wrap(~Season)
 
+# Line plot
+diffs.neslme<- diffs.df
+
 
 #####
 ## Min and Max
@@ -223,5 +228,6 @@ sst.model.proj<- projectRaster(sst.model, crs = proj.utm)
 names(sst.model.proj)<- names(sst.anom)
 sst.model<- projectRaster(sst.model.proj, crs = proj.wgs84)
 writeRaster(sst.model.proj, filename = paste("~/GitHub/COCA/Data/", "climate.sst.proj.pct95.grd", sep = ""), format = "raster", overwrite = TRUE)
+
 
 

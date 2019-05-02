@@ -1039,12 +1039,13 @@ for(i in 1:nrow(dat.train)){
   # All possible prediction curves, the original smooth, and then the one we have selected...
   # Some prep
   ilink<- family(dat.use$mod.fitted.b[[1]])$linkinv
+
   pred.dat.use<- pred.dat[pred.dat$SEASON == season.use, ]
   rescaled.dat.use<- rescaled.dat[rescaled.dat$Season == season.use, ]
   
   # Predictor matrix
   pred.mat<- predict(dat.use$mod.fitted.b[[1]], newdata = pred.dat.use, type = "lpmatrix")
-  
+
   # Original predictions
   pred0<- exp(ilink(pred.mat %*% coef(dat.use$mod.fitted.b[[1]])))
   
@@ -1186,14 +1187,14 @@ for(i in seq_along(res.files)){
   sdm.map.fut.pct95.b<- data.frame("x" = newdat.95$x, "y" = newdat.95$y, "pred.95" = sdm.fut.pct95.b)
   
   # Differences
-  sdm.diff.p<- data.frame("x" = sdm.map.fut.mu.p$x, "y" = sdm.map.fut.mu.p$y, "pred" = sdm.map.fut.mu.p$pred - sdm.map.base.p$pred)
-  sdm.lwr.diff.p<- data.frame("x" = sdm.map.fut.pct05.p$x, "y" = sdm.map.fut.pct05.p$y, "pred" = sdm.map.fut.pct05.p$pred - sdm.map.base.p$pred)
-  sdm.upr.diff.p<- data.frame("x" = sdm.map.fut.pct95.p$x, "y" = sdm.map.fut.pct95.p$y, "pred" = sdm.map.fut.pct95.p$pred - sdm.map.base.p$pred)
+  sdm.diff.p<- data.frame("x" = sdm.map.fut.mu.p$x, "y" = sdm.map.fut.mu.p$y, "pred" = mean(sdm.map.fut.mu.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))
+  sdm.lwr.diff.p<- data.frame("x" = sdm.map.fut.pct05.p$x, "y" = sdm.map.fut.pct05.p$y, "pred" = mean(sdm.map.fut.pct05.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))
+  sdm.upr.diff.p<- data.frame("x" = sdm.map.fut.pct95.p$x, "y" = sdm.map.fut.pct95.p$y, "pred" = mean(sdm.map.fut.pct95.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))
   
   # Percent Differences
-  sdm.percdiff.p<- data.frame("x" = sdm.map.fut.mu.p$x, "y" = sdm.map.fut.mu.p$y, "pred" = ((sdm.map.fut.mu.p$pred - sdm.map.base.p$pred)/sdm.map.base.p$pred))
-  sdm.lwr.percdiff.p<- data.frame("x" = sdm.map.fut.pct05.p$x, "y" = sdm.map.fut.pct05.p$y, "pred" = ((sdm.map.fut.pct05.p$pred - sdm.map.base.p$pred)/sdm.map.base.p$pred))
-  sdm.upr.percdiff.p<- data.frame("x" = sdm.map.fut.pct95.p$x, "y" = sdm.map.fut.pct95.p$y, "pred" = ((sdm.map.fut.pct95.p$pred - sdm.map.base.p$pred)/sdm.map.base.p$pred))
+  sdm.percdiff.p<- data.frame("x" = sdm.map.fut.mu.p$x, "y" = sdm.map.fut.mu.p$y, "pred" = 100*((mean(sdm.map.fut.mu.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))/mean(sdm.map.base.p$pred, na.rm = TRUE)))
+  sdm.lwr.percdiff.p<- data.frame("x" = sdm.map.fut.pct05.p$x, "y" = sdm.map.fut.pct05.p$y, "pred" = 100*((mean(sdm.map.fut.pct05.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))/mean(sdm.map.base.p$pred, na.rm = TRUE)))
+  sdm.upr.percdiff.p<- data.frame("x" = sdm.map.fut.pct95.p$x, "y" = sdm.map.fut.pct95.p$y, "pred" = 100*((mean(sdm.map.fut.pct95.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))/mean(sdm.map.base.p$pred, na.rm = TRUE)))
   
   names(sdm.map.base.p)[3]<- "Baseline.sdm.p"
   names(sdm.map.fut.mu.p)[3]<- "Future_mean.sdm.p"
@@ -1207,13 +1208,13 @@ for(i in seq_along(res.files)){
   names(sdm.upr.percdiff.p)[3]<- "Future_warm_percdiff.sdm.p"
   
   # Biomass
-  sdm.diff.b<- data.frame("x" = sdm.map.fut.mu.b$x, "y" = sdm.map.fut.mu.b$y, "pred" = sdm.map.fut.mu.b$pred - sdm.map.base.b$pred)
-  sdm.lwr.diff.b<- data.frame("x" = sdm.map.fut.pct05.b$x, "y" = sdm.map.fut.pct05.b$y, "pred" = sdm.map.fut.pct05.b$pred - sdm.map.base.b$pred)
-  sdm.upr.diff.b<- data.frame("x" = sdm.map.fut.pct95.b$x, "y" = sdm.map.fut.pct95.b$y, "pred" = sdm.map.fut.pct95.b$pred - sdm.map.base.b$pred)
+  sdm.diff.b<- data.frame("x" = sdm.map.fut.mu.b$x, "y" = sdm.map.fut.mu.b$y, "pred" = mean(sdm.map.fut.mu.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))
+  sdm.lwr.diff.b<- data.frame("x" = sdm.map.fut.pct05.b$x, "y" = sdm.map.fut.pct05.b$y, "pred" = mean(sdm.map.fut.pct05.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))
+  sdm.upr.diff.b<- data.frame("x" = sdm.map.fut.pct95.b$x, "y" = sdm.map.fut.pct95.b$y, "pred" = mean(sdm.map.fut.pct95.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))
   
-  sdm.percdiff.b<- data.frame("x" = sdm.map.fut.mu.b$x, "y" = sdm.map.fut.mu.b$y, "pred" = ((sdm.map.fut.mu.b$pred - sdm.map.base.b$pred)/sdm.map.base.b$pred))
-  sdm.lwr.percdiff.b<- data.frame("x" = sdm.map.fut.pct05.b$x, "y" = sdm.map.fut.pct05.b$y, "pred" = ((sdm.map.fut.pct05.b$pred - sdm.map.base.b$pred)/sdm.map.base.b$pred))
-  sdm.upr.percdiff.b<- data.frame("x" = sdm.map.fut.pct95.b$x, "y" = sdm.map.fut.pct95.b$y, "pred" = ((sdm.map.fut.pct95.b$pred - sdm.map.base.b$pred)/sdm.map.base.b$pred))
+  sdm.percdiff.b<- data.frame("x" = sdm.map.fut.mu.b$x, "y" = sdm.map.fut.mu.b$y, "pred" = 100*((mean(sdm.map.fut.mu.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))/mean(sdm.map.base.b$pred, na.rm = TRUE)))
+  sdm.lwr.percdiff.b<- data.frame("x" = sdm.map.fut.pct05.b$x, "y" = sdm.map.fut.pct05.b$y, "pred" = 100*((mean(sdm.map.fut.pct05.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))/mean(sdm.map.base.b$pred, na.rm = TRUE)))
+  sdm.upr.percdiff.b<- data.frame("x" = sdm.map.fut.pct95.b$x, "y" = sdm.map.fut.pct95.b$y, "pred" = 100*((mean(sdm.map.fut.pct95.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))/mean(sdm.map.base.b$pred, na.rm = TRUE)))
   
   names(sdm.map.base.b)[3]<- "Baseline.sdm.b"
   names(sdm.map.fut.mu.b)[3]<- "Future_mean.sdm.b"
@@ -1258,13 +1259,13 @@ for(i in seq_along(res.files)){
   combo.map.fut.pct95<- data.frame("x" = newdat.95$x, "y" = newdat.95$y, "pred.95" = round(sdm.fut.pct95.p * exp(ilink(as.numeric(lpmat.fut.pct95 %*% t(best.fit.mat)))), 2))
   
   # Differences
-  combo.diff<- data.frame("x" = combo.map.fut.mu$x, "y" = combo.map.fut.mu$y, "pred" = combo.map.fut.mu$pred - combo.map.base$pred)
-  combo.lwr.diff<- data.frame("x" = combo.map.fut.pct05$x, "y" = combo.map.fut.pct05$y, "pred" = combo.map.fut.pct05$pred - combo.map.base$pred)
-  combo.upr.diff<- data.frame("x" = combo.map.fut.pct95$x, "y" = combo.map.fut.pct95$y, "pred" = combo.map.fut.pct95$pred - combo.map.base$pred)
+  combo.diff<- data.frame("x" = combo.map.fut.mu$x, "y" = combo.map.fut.mu$y, "pred" = mean(combo.map.fut.mu$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))
+  combo.lwr.diff<- data.frame("x" = combo.map.fut.pct05$x, "y" = combo.map.fut.pct05$y, "pred" = mean(combo.map.fut.pct05$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))
+  combo.upr.diff<- data.frame("x" = combo.map.fut.pct95$x, "y" = combo.map.fut.pct95$y, "pred" = mean(combo.map.fut.pct95$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))
   
-  combo.percdiff<- data.frame("x" = combo.map.fut.mu$x, "y" = combo.map.fut.mu$y, "pred" = ((combo.map.fut.mu$pred - combo.map.base$pred)/combo.map.base$pred))
-  combo.lwr.percdiff<- data.frame("x" = combo.map.fut.pct05$x, "y" = combo.map.fut.pct05$y, "pred" = ((combo.map.fut.pct05$pred - combo.map.base$pred)/combo.map.base$pred))
-  combo.upr.percdiff<- data.frame("x" = combo.map.fut.pct95$x, "y" = combo.map.fut.pct95$y, "pred" = ((combo.map.fut.pct95$pred - combo.map.base$pred)/combo.map.base$pred))
+  combo.percdiff<- data.frame("x" = combo.map.fut.mu$x, "y" = combo.map.fut.mu$y, "pred" = 100*((mean(combo.map.fut.mu$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))/mean(combo.map.base$pred, na.rm = TRUE)))
+  combo.lwr.percdiff<- data.frame("x" = combo.map.fut.pct05$x, "y" = combo.map.fut.pct05$y, "pred" = 100*((mean(combo.map.fut.pct05$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))/mean(combo.map.base$pred, na.rm = TRUE)))
+  combo.upr.percdiff<- data.frame("x" = combo.map.fut.pct95$x, "y" = combo.map.fut.pct95$y, "pred" = 100*((mean(combo.map.fut.pct95$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))/mean(combo.map.base$pred, na.rm = TRUE)))
   
   # Calculate fish availability for the different datasets: combo.map.base, combo.map.fut.mu, combo.map.fut.pct05, combo.map.fut.pct95, combo.diff, combo.lwr.diff, combo.upr.diff
   names(combo.map.base)[3]<- "Baseline.combo.b"
@@ -1673,6 +1674,10 @@ result$Future_mean_percdiff.combo.b<- as.numeric(unlist(result$Future_mean_percd
 result$Future_cold_percdiff.combo.b<- as.numeric(unlist(result$Future_cold_percdiff.combo.b))
 result$Future_warm_percdiff.combo.b<- as.numeric(unlist(result$Future_warm_percdiff.combo.b))
 
+# Temp work
+temp<- result %>%
+  filter(., COMNAME == "ATLANTIC CROAKER" & Port == "PORTLAND_ME.All.JGS.PROPORTION" & Stat == "Mean")
+
 # Group by species and Port, take column means
 out<- result %>% 
   group_by(COMNAME, Port, Stat) %>%
@@ -1717,7 +1722,7 @@ port.data.out$StateOnly<- unlist(lapply(comm.names.split, "[", 2))
 
 port.data.out<- port.data.out %>%
   ungroup() %>%
-  dplyr::select(., COMNAME, Port_GearType, CommunityOnly, StateOnly, Gear, Footprint, colnames(port.data.out)[3:27]) %>%
+  dplyr::select(., COMNAME, Port_GearType, CommunityOnly, StateOnly, Gear, Footprint, colnames(port.data.out)[3:33]) %>%
   gather(., "ProjectionScenario", "Value", -COMNAME, -Port_GearType, -CommunityOnly, -StateOnly, -Gear, -Footprint, -Stat) %>%
   dplyr::select(., COMNAME, CommunityOnly, StateOnly, Gear, Footprint, ProjectionScenario, Stat, Value)
 
@@ -1761,6 +1766,9 @@ brad<- brad %>%
   left_join(., cfders.sppnames) %>%
   dplyr::select(., c("CommonName", "CFDERSCommonName", "Community", "CFDERSPortCode", "CFDERSPortName", "Gear", "Footprint", "ProjectionScenario", "Statistic", "Value")
   )
+
+brad.temp<- brad %>% 
+  filter(., CommonName == "ACADIAN REDFISH" & Community == "NEW BEDFORD_MA" & Gear == "All" & Footprint == "Regular")
 write.csv(brad, "~/GitHub/COCA/Results/EcoToEconPortData03152019.csv")
 
 
@@ -3178,7 +3186,6 @@ print(hyper.grid[opt_i,])
 ## What about NEVA Vulnerability (sensitivity and exposure)?
 
 
-
 # Results — Combo vs. SDM predictive ability to baseline ------------------
 # Calculate difference in key statistics between the two models
 mod.diffs<- mod.res %>%
@@ -4282,6 +4289,25 @@ south.sst<- raster::extract(sst.model, south2, fun = mean)
 gom2<- erase(nelme.sp, south2)
 gom.sst<- raster::extract(sst.model, gom2, fun = mean)
 
+gom.oisst<- raster::extract(oisst.dat, gom2, fun = mean, na.rm = T)
+south.oisst<- raster::extract(oisst.dat, south2, fun = mean, na.rm = T)
+reg.oisst.df<- data.frame("Date" = rep(gsub("X", "", dimnames(gom.oisst)[[2]]), 2), "Region" = c(rep("Gulf of Maine", length(dimnames(gom.oisst)[[2]])), rep("Southern New England", length(dimnames(gom.oisst)[[2]]))), "SST" = c(as.numeric(gom.oisst), as.numeric(south.oisst)))
+reg.oisst.df$Date<- as.Date(gsub("[.]", "-", reg.oisst.df$Date))
+reg.oisst.df$Month<- format(reg.oisst.df$Date, "%m")
+reg.oisst.df$Year<- as.numeric(format(reg.oisst.df$Date, "%Y"))
+reg.oisst.df.summ<- reg.oisst.df %>%
+  group_by(., Region, Year, Month) %>%
+  summarise("DailyTempAboveThresh" = sum(SST>20, na.rm = T),
+            "DaysMonth" = n()) %>%
+  mutate("Proportion" = DailyTempAboveThresh/DaysMonth)
+reg.oisst.df.summ$Plot.Date<- as.Date(as.yearmon(paste(reg.oisst.df.summ$Year, reg.oisst.df.summ$Month, sep = "-")))
+
+plot.dat<- reg.oisst.df.summ %>%
+  dplyr::filter(., Plot.Date >= "1982-01-01" & Region == "Gulf of Maine")
+ggplot(data = plot.dat, aes(x = Plot.Date, y = Proportion, group = Region)) +
+  geom_line()
+
+
 # Now --- want to get the average value by date and plot the time series
 sst.mn<- data.frame("Date" = rep(gsub("X", "", dimnames(nelme.sst)[[2]]), 3), "Region" = c(rep("NES LME", length(dimnames(nelme.sst)[[2]])), rep("GoM", length(dimnames(nelme.sst)[[2]])), rep("Southern NES LME", length(dimnames(nelme.sst)[[2]]))), "SST" = c(as.numeric(nelme.sst), as.numeric(gom.sst), as.numeric(south.sst)))
 sst.mn$Date<- as.Date(gsub("[.]", "-", sst.mn$Date))
@@ -4289,6 +4315,18 @@ sst.mn$Month<- as.numeric(format(sst.mn$Date, "%m"))
 sst.mn$Year<- as.numeric(format(sst.mn$Date, "%Y"))
 sst.mn$Season<- ifelse(sst.mn$Month >= 3 & sst.mn$Month <= 5, "SPRING", 
                        ifelse(sst.mn$Month >= 9 & sst.mn$Month <= 11, "FALL", NA))
+
+
+## Percent of months that exceed 20 degrees
+sst.mn.20deg<- sst.mn %>%
+  mutate(., "Threshold" = ifelse(SST >= 20, "Yes", "No"))
+sst.mn.20deg<- sst.mn.20deg %>%
+  group_by(., Region, Year, Threshold) %>%
+  tally() %>%
+  filter(., Threshold == "Yes")
+
+ggplot(data = sst.mn.20deg, aes(x = Year, y = n, color = Region)) +
+  geom_line() 
 
 
 ## Inspect the file using the ncdf4 libaray
