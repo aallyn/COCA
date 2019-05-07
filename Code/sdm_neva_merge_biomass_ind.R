@@ -1949,28 +1949,6 @@ out.s<- plot_grid(plots.out.s[[1]], plots.out.s[[2]], plots.out.s[[3]], plots.ou
 ggplot2::ggsave(filename = paste(out.dir, "SpringTaylorDiagram", ".jpg", sep = ""), plot = out.s, width = 18, height = 10, units = "in")
 
 # Results — SDM shelfwide and regional changes ----------------------------
-if(FALSE){
-  # Probably easiest if we keep the mod.res file consistent for cutting species. But, if we want to try something else, we could do that here:
-  out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
-  results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) # This should have everything we need. 
-  
-  # Let's get the model fit, too....
-  mod.results<- read.csv(paste(out.dir, "mod.results.csv", sep = ""))
-  dat.full<- results %>%
-    left_join(., mod.results, by = c("COMNAME", "SEASON")) %>%
-    dplyr::select(., -X)
-  dat.full$AUC.SDM[is.na(dat.full$AUC.SDM)]<- 0
-  
-  # Exploring cut offs... at least 5% deviance explained?
-  mod.spp.keep<- mod.results %>%
-    filter(., AUC >= 0.7) %>%
-    group_by(., COMNAME) %>%
-    summarize_at(vars(SEASON), n_distinct) %>%
-    filter(., SEASON == 2)
-  
-  dat.sub<- dat.full %>%
-    filter(., COMNAME %in% mod.spp.keep$COMNAME)
-}
 # Read in projections
 out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
 results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) # This should have everything we need. 
@@ -1984,49 +1962,13 @@ dat.full<- dat.sub
 proj.wgs84<- CRS("+init=epsg:4326") #WGS84
 proj.utm<- CRS("+init=epsg:2960") #UTM 19
 
-# NELME
-nelme<- st_read("~/GitHub/COCA/Data/NELME_clipped.shp")
-st_crs(nelme)<- "+init=epsg:4326"
-nelme.sp<- as(nelme, "Spatial")
-
-# GoM
-gom<- st_read("~/GitHub/COCA/Data/GoMPhysioRegions/PhysioRegions_WGS84.shp")
-st_crs(gom)<- "+init=epsg:4326"
-gom<- gom[!gom$Region == "Seamount",] %>%
-  st_union() %>%
-  st_sf()
-gom.sp<- as(st_zm(gom), "Spatial")
-gom.sp<- spTransform(gom.sp, proj.utm)
-gom.sp.wgs<-  spTransform(gom.sp, proj4string(nelme.sp))
-
-# Buffer it a bit
-gom.buff<- gBuffer(gom.sp, width = 7500)
-gom.buff<- spTransform(gom.buff, proj4string(nelme.sp))
-
-# Southern regions
-south<- erase(nelme.sp, gom.buff)
-
-# Still a bit remaining...custom box to get rid of the rest of it
-# Coordinates
-ow<- data.frame("x" = c(-71, -71, -67, -67), "y" = c(42, 46, 46, 42))
-
-# Convert coordinates to Spatial Polygons
-ow.p<- Polygon(ow)
-ow.ps<- Polygons(list(ow.p), 1)
-ow.sp<- SpatialPolygons(list(ow.ps))
-proj4string(ow.sp)<- proj4string(nelme.sp)
-south2<- erase(south, ow.sp)
-proj4string(south2)<- proj4string(nelme.sp)
-
-# Check em ---
-if(FALSE){
-  plot(nelme.sp)
-  plot(gom.sp.wgs, col = "red", add = T)
-  plot(south2, col = "blue", add = T)
-}
+# NELME, GoM and Southern New England-Mid Atlantic Bight Regions
+nelme<- as(st_read("~/GitHub/COCA/Data/NELME_sf.shp"), "Spatial")
+gom<- as(st_read("~/GitHub/COCA/Data/GoM_sf.shp"), "Spatial")
+south<- as(st_read("~/GitHub/COCA/Data/SNEandMAB_sf.shp"), "Spatial")
 
 # Overlay func
-overlay_func<- function(df, region, proj.use = proj4string(nelme.sp)){
+overlay_func<- function(df, region, proj.use = proj4string(nelme)){
   dat.use<- data.frame(df)
   pts.temp<- dat.use
   coordinates(pts.temp)<- ~x+y
@@ -2034,8 +1976,8 @@ overlay_func<- function(df, region, proj.use = proj4string(nelme.sp)){
   
   switch(region,
          NELME = mean(dat.use[,3], na.rm = T),
-         GOM = mean(data.frame(pts.temp[!is.na(over(pts.temp, as(gom.sp.wgs, "SpatialPolygons"))),])[,3], na.rm = T),
-         South = mean(data.frame(pts.temp[!is.na(over(pts.temp, as(south2, "SpatialPolygons"))),])[,3], na.rm = T))
+         GOM = mean(data.frame(pts.temp[!is.na(over(pts.temp, as(gom, "SpatialPolygons"))),])[,3], na.rm = T),
+         South = mean(data.frame(pts.temp[!is.na(over(pts.temp, as(south, "SpatialPolygons"))),])[,3], na.rm = T))
 }
 
 preds.df.sub<- dat.full %>%
