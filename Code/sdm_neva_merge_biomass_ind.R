@@ -1187,14 +1187,14 @@ for(i in seq_along(res.files)){
   sdm.map.fut.pct95.b<- data.frame("x" = newdat.95$x, "y" = newdat.95$y, "pred.95" = sdm.fut.pct95.b)
   
   # Differences
-  sdm.diff.p<- data.frame("x" = sdm.map.fut.mu.p$x, "y" = sdm.map.fut.mu.p$y, "pred" = mean(sdm.map.fut.mu.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))
-  sdm.lwr.diff.p<- data.frame("x" = sdm.map.fut.pct05.p$x, "y" = sdm.map.fut.pct05.p$y, "pred" = mean(sdm.map.fut.pct05.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))
-  sdm.upr.diff.p<- data.frame("x" = sdm.map.fut.pct95.p$x, "y" = sdm.map.fut.pct95.p$y, "pred" = mean(sdm.map.fut.pct95.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))
+  sdm.diff.p<- data.frame("x" = sdm.map.fut.mu.p$x, "y" = sdm.map.fut.mu.p$y, "pred" = sdm.map.fut.mu.p$pred - sdm.map.base.p$pred)
+  sdm.lwr.diff.p<- data.frame("x" = sdm.map.fut.pct05.p$x, "y" = sdm.map.fut.pct05.p$y, "pred" = sdm.map.fut.pct05.p$pred - sdm.map.base.p$pred)
+  sdm.upr.diff.p<- data.frame("x" = sdm.map.fut.pct95.p$x, "y" = sdm.map.fut.pct95.p$y, "pred" = sdm.map.fut.pct95.p$pred - sdm.map.base.p$pred)
   
   # Percent Differences
-  sdm.percdiff.p<- data.frame("x" = sdm.map.fut.mu.p$x, "y" = sdm.map.fut.mu.p$y, "pred" = 100*((mean(sdm.map.fut.mu.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))/mean(sdm.map.base.p$pred, na.rm = TRUE)))
-  sdm.lwr.percdiff.p<- data.frame("x" = sdm.map.fut.pct05.p$x, "y" = sdm.map.fut.pct05.p$y, "pred" = 100*((mean(sdm.map.fut.pct05.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))/mean(sdm.map.base.p$pred, na.rm = TRUE)))
-  sdm.upr.percdiff.p<- data.frame("x" = sdm.map.fut.pct95.p$x, "y" = sdm.map.fut.pct95.p$y, "pred" = 100*((mean(sdm.map.fut.pct95.p$pred, na.rm = TRUE) - mean(sdm.map.base.p$pred, na.rm = TRUE))/mean(sdm.map.base.p$pred, na.rm = TRUE)))
+  sdm.percdiff.p<- data.frame("x" = sdm.map.fut.mu.p$x, "y" = sdm.map.fut.mu.p$y, "pred" = 100*((sdm.map.fut.mu.p$pred - sdm.map.base.p$pred)/sdm.map.base.p$pred))
+  sdm.lwr.percdiff.p<- data.frame("x" = sdm.map.fut.pct05.p$x, "y" = sdm.map.fut.pct05.p$y, "pred" = 100*((sdm.map.fut.pct05.p$pred - sdm.map.base.p$pred)/sdm.map.base.p$pred))
+  sdm.upr.percdiff.p<- data.frame("x" = sdm.map.fut.pct95.p$x, "y" = sdm.map.fut.pct95.p$y, "pred" = 100*((sdm.map.fut.pct95.p$pred - sdm.map.base.p$pred)/sdm.map.base.p$pred))
   
   names(sdm.map.base.p)[3]<- "Baseline.sdm.p"
   names(sdm.map.fut.mu.p)[3]<- "Future_mean.sdm.p"
@@ -1208,13 +1208,13 @@ for(i in seq_along(res.files)){
   names(sdm.upr.percdiff.p)[3]<- "Future_warm_percdiff.sdm.p"
   
   # Biomass
-  sdm.diff.b<- data.frame("x" = sdm.map.fut.mu.b$x, "y" = sdm.map.fut.mu.b$y, "pred" = mean(sdm.map.fut.mu.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))
-  sdm.lwr.diff.b<- data.frame("x" = sdm.map.fut.pct05.b$x, "y" = sdm.map.fut.pct05.b$y, "pred" = mean(sdm.map.fut.pct05.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))
-  sdm.upr.diff.b<- data.frame("x" = sdm.map.fut.pct95.b$x, "y" = sdm.map.fut.pct95.b$y, "pred" = mean(sdm.map.fut.pct95.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))
+  sdm.diff.b<- data.frame("x" = sdm.map.fut.mu.b$x, "y" = sdm.map.fut.mu.b$y, "pred" = sdm.map.fut.mu.b$pred - sdm.map.base.b$pred)
+  sdm.lwr.diff.b<- data.frame("x" = sdm.map.fut.pct05.b$x, "y" = sdm.map.fut.pct05.b$y, "pred" = sdm.map.fut.pct05.b$pred - sdm.map.base.b$pred)
+  sdm.upr.diff.b<- data.frame("x" = sdm.map.fut.pct95.b$x, "y" = sdm.map.fut.pct95.b$y, "pred" = sdm.map.fut.pct95.b$pred - sdm.map.base.b$pred)
   
-  sdm.percdiff.b<- data.frame("x" = sdm.map.fut.mu.b$x, "y" = sdm.map.fut.mu.b$y, "pred" = 100*((mean(sdm.map.fut.mu.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))/mean(sdm.map.base.b$pred, na.rm = TRUE)))
-  sdm.lwr.percdiff.b<- data.frame("x" = sdm.map.fut.pct05.b$x, "y" = sdm.map.fut.pct05.b$y, "pred" = 100*((mean(sdm.map.fut.pct05.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))/mean(sdm.map.base.b$pred, na.rm = TRUE)))
-  sdm.upr.percdiff.b<- data.frame("x" = sdm.map.fut.pct95.b$x, "y" = sdm.map.fut.pct95.b$y, "pred" = 100*((mean(sdm.map.fut.pct95.b$pred, na.rm = TRUE) - mean(sdm.map.base.b$pred, na.rm = TRUE))/mean(sdm.map.base.b$pred, na.rm = TRUE)))
+  sdm.percdiff.b<- data.frame("x" = sdm.map.fut.mu.b$x, "y" = sdm.map.fut.mu.b$y, "pred" = 100*((sdm.map.fut.mu.b$pred - sdm.map.base.b$pred)/sdm.map.base.b$pred))
+  sdm.lwr.percdiff.b<- data.frame("x" = sdm.map.fut.pct05.b$x, "y" = sdm.map.fut.pct05.b$y, "pred" = 100*((sdm.map.fut.pct05.b$pred - sdm.map.base.b$pred)/sdm.map.base.b$pred))
+  sdm.upr.percdiff.b<- data.frame("x" = sdm.map.fut.pct95.b$x, "y" = sdm.map.fut.pct95.b$y, "pred" = 100*((sdm.map.fut.pct95.b$pred - sdm.map.base.b$pred)/sdm.map.base.b$pred))
   
   names(sdm.map.base.b)[3]<- "Baseline.sdm.b"
   names(sdm.map.fut.mu.b)[3]<- "Future_mean.sdm.b"
@@ -1259,13 +1259,13 @@ for(i in seq_along(res.files)){
   combo.map.fut.pct95<- data.frame("x" = newdat.95$x, "y" = newdat.95$y, "pred.95" = round(sdm.fut.pct95.p * exp(ilink(as.numeric(lpmat.fut.pct95 %*% t(best.fit.mat)))), 2))
   
   # Differences
-  combo.diff<- data.frame("x" = combo.map.fut.mu$x, "y" = combo.map.fut.mu$y, "pred" = mean(combo.map.fut.mu$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))
-  combo.lwr.diff<- data.frame("x" = combo.map.fut.pct05$x, "y" = combo.map.fut.pct05$y, "pred" = mean(combo.map.fut.pct05$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))
-  combo.upr.diff<- data.frame("x" = combo.map.fut.pct95$x, "y" = combo.map.fut.pct95$y, "pred" = mean(combo.map.fut.pct95$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))
+  combo.diff<- data.frame("x" = combo.map.fut.mu$x, "y" = combo.map.fut.mu$y, "pred" = combo.map.fut.mu$pred - combo.map.base$pred)
+  combo.lwr.diff<- data.frame("x" = combo.map.fut.pct05$x, "y" = combo.map.fut.pct05$y, "pred" = combo.map.fut.pct05$pred - combo.map.base$pred)
+  combo.upr.diff<- data.frame("x" = combo.map.fut.pct95$x, "y" = combo.map.fut.pct95$y, "pred" = combo.map.fut.pct95$pred - combo.map.base$pred)
   
-  combo.percdiff<- data.frame("x" = combo.map.fut.mu$x, "y" = combo.map.fut.mu$y, "pred" = 100*((mean(combo.map.fut.mu$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))/mean(combo.map.base$pred, na.rm = TRUE)))
-  combo.lwr.percdiff<- data.frame("x" = combo.map.fut.pct05$x, "y" = combo.map.fut.pct05$y, "pred" = 100*((mean(combo.map.fut.pct05$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))/mean(combo.map.base$pred, na.rm = TRUE)))
-  combo.upr.percdiff<- data.frame("x" = combo.map.fut.pct95$x, "y" = combo.map.fut.pct95$y, "pred" = 100*((mean(combo.map.fut.pct95$pred, na.rm = TRUE) - mean(combo.map.base$pred, na.rm = TRUE))/mean(combo.map.base$pred, na.rm = TRUE)))
+  combo.percdiff<- data.frame("x" = combo.map.fut.mu$x, "y" = combo.map.fut.mu$y, "pred" = 100*((combo.map.fut.mu$pred - combo.map.base$pred)/combo.map.base$pred))
+  combo.lwr.percdiff<- data.frame("x" = combo.map.fut.pct05$x, "y" = combo.map.fut.pct05$y, "pred" = 100*((combo.map.fut.pct05$pred - combo.map.base$pred)/combo.map.base$pred))
+  combo.upr.percdiff<- data.frame("x" = combo.map.fut.pct95$x, "y" = combo.map.fut.pct95$y, "pred" = 100*((combo.map.fut.pct95$pred - combo.map.base$pred)/combo.map.base$pred))
   
   # Calculate fish availability for the different datasets: combo.map.base, combo.map.fut.mu, combo.map.fut.pct05, combo.map.fut.pct95, combo.diff, combo.lwr.diff, combo.upr.diff
   names(combo.map.base)[3]<- "Baseline.combo.b"
@@ -1325,11 +1325,12 @@ for(i in seq_along(res.files)){
   }
 }
 
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_05072019/" 
 saveRDS(result, file = paste(out.dir, "SDMPredictions.rds", sep = ""))
 
 
 # Predictions summarized for communities ----------------------------------------------
-out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_05072019/"
 fish_avail_func<- function(df) {
   
   if(FALSE){
@@ -1628,11 +1629,12 @@ results.check<- results %>%
   summarize(.,
             "Projections" = n_distinct(Proj.Class))
 
-# Looks good. Now overlay fishing footprints.
-results<- results %>%
+# Looks good. Now we are actually only going to need to calculate the fish availability within fishing footprints as: average in the baseline period, and average in the future period. Using these two pieces of information, we will then calculate the difference in averages and percent change in averages...
+results.sub<- results[-which(grepl("diff", results$Proj.Class)), ]
+results.sub<- results.sub %>%
   mutate(., "Fish.Availability" = map(Projections, possibly(fish_avail_func, NA)))
 
-saveRDS(results, paste(out.dir, "FishAvailability.rds", sep = ""))
+saveRDS(results.sub, paste(out.dir, "FishAvailability.rds", sep = ""))
 
 # Ideally, we want species-season-port and then all the changes as columns...
 results<- readRDS(paste(out.dir, "FishAvailability.rds", sep = ""))
@@ -1665,14 +1667,19 @@ for(i in seq_along(spp.season)){
   }
 }
 
+# Now, calculate raw and percent changes...
+result<- result %>%
+  mutate(., "Future_mean_diff.combo.b" = Future_mean.combo.b - Baseline.combo.b,
+         "Future_cold_diff.combo.b" = Future_cold.combo.b - Baseline.combo.b,
+         "Future_warm_diff.combo.b" = Future_warm.combo.b - Baseline.combo.b,
+         "Future_mean_percdiff.combo.b" = 100*(Future_mean_diff.combo.b/Baseline.combo.b),
+         "Future_cold_percdiff.combo.b" = 100*(Future_cold_diff.combo.b/Baseline.combo.b),
+         "Future_warm_percdiff.combo.b" = 100*(Future_warm_diff.combo.b/Baseline.combo.b))
+
 # Change all SD stat percent changes to NA
 result$Future_mean_percdiff.combo.b[result$Stat == "SD"]<- NA
 result$Future_cold_percdiff.combo.b[result$Stat == "SD"]<- NA
 result$Future_warm_percdiff.combo.b[result$Stat == "SD"]<- NA
-
-result$Future_mean_percdiff.combo.b<- as.numeric(unlist(result$Future_mean_percdiff.combo.b))
-result$Future_cold_percdiff.combo.b<- as.numeric(unlist(result$Future_cold_percdiff.combo.b))
-result$Future_warm_percdiff.combo.b<- as.numeric(unlist(result$Future_warm_percdiff.combo.b))
 
 # Temp work
 temp<- result %>%
@@ -1681,7 +1688,7 @@ temp<- result %>%
 # Group by species and Port, take column means
 out<- result %>% 
   group_by(COMNAME, Port, Stat) %>%
-  summarize_if(is.double, mean, na.rm = T) %>%
+  summarize_if(is.double, mean, na.rm = TRUE) %>%
   arrange(., COMNAME, Stat, Port)
 
 # Separate Port and Gear Type
@@ -1722,18 +1729,18 @@ port.data.out$StateOnly<- unlist(lapply(comm.names.split, "[", 2))
 
 port.data.out<- port.data.out %>%
   ungroup() %>%
-  dplyr::select(., COMNAME, Port_GearType, CommunityOnly, StateOnly, Gear, Footprint, colnames(port.data.out)[3:33]) %>%
+  dplyr::select(., COMNAME, Port_GearType, CommunityOnly, StateOnly, Gear, Footprint, colnames(port.data.out)[3:21]) %>%
   gather(., "ProjectionScenario", "Value", -COMNAME, -Port_GearType, -CommunityOnly, -StateOnly, -Gear, -Footprint, -Stat) %>%
   dplyr::select(., COMNAME, CommunityOnly, StateOnly, Gear, Footprint, ProjectionScenario, Stat, Value)
 
-write_csv(port.data.out, paste(out.dir, "SppPortGearData_03152019.csv", sep = ""))
+write_csv(port.data.out, paste(out.dir, "SppPortGearData_05072019.csv", sep = ""))
 
 ## A bit of clean up -- Kathy and Brian probably don't need all of this stuff
 ProjectionScenario.Keep<- c("Baseline.combo.b", "Future_mean.combo.b", "Future_mean_diff.combo.b", "Future_mean_percdiff.combo.b", "Future_warm.combo.b", "Future_warm_diff.combo.b", "Future_warm_percdiff.combo.b",  "Future_cold.combo.b", "Future_cold_diff.combo.b", "Future_cold_percdiff.combo.b")
 port.data.out.filtered<- port.data.out %>%
   filter(., Footprint == "Regular" & Stat == "Mean") %>%
   filter(., ProjectionScenario %in% ProjectionScenario.Keep)
-write_csv(port.data.out.filtered, paste(out.dir, "SppPortGearData_Filtered_03152019.csv", sep = ""))
+write_csv(port.data.out.filtered, paste(out.dir, "SppPortGearData_Filtered_05072019.csv", sep = ""))
 
 # Let's add in CFDERRS ports...
 vtr.cfderrs.table<- read_csv("~/GitHub/COCA-EcoAndEcon/Results/VTR_CFDERRS_Comparison_Edited_NoCounties.csv")
@@ -1750,7 +1757,7 @@ port.data.out<- port.data.out %>%
 colnames(port.data.out)<- c("CommonName", "Community", "CFDERSPortCode", "CFDERSPortName", "Gear", "Footprint", "ProjectionScenario", "Statistic", "Value")
 
 port.data.out$Gear<- gsub("[.]", "_", port.data.out$Gear)
-write.csv(port.data.out, "~/GitHub/COCA/Results/PortData03152019.csv")
+write.csv(port.data.out, "~/GitHub/COCA/Results/PortData05072019.csv")
 
 # Filter for Brad...
 scenarios.keep<- c("Baseline.combo.b", "Future_mean.combo.b", "Future_mean_diff.combo.b", "Future_mean_percdiff.combo.b", "Future_cold.combo.b", "Future_cold_diff.combo.b", "Future_cold_percdiff.combo.b", "Future_warm.combo.b", "Future_warm_diff.combo.b", "Future_warm_percdiff.combo.b")
@@ -1769,12 +1776,12 @@ brad<- brad %>%
 
 brad.temp<- brad %>% 
   filter(., CommonName == "ACADIAN REDFISH" & Community == "NEW BEDFORD_MA" & Gear == "All" & Footprint == "Regular")
-write.csv(brad, "~/GitHub/COCA/Results/EcoToEconPortData03152019.csv")
+write.csv(brad, "~/GitHub/COCA/Results/EcoToEconPortData05072019.csv")
 
 
 # Results — Filtering, always run -----------------------------------------------
 # Real data
-out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_05072019/"
 mod.res<- read_csv(paste(out.dir, "mod.results.csv", sep = "")) %>%
   drop_na(RMSE.SDM.B, CorrCoeff.SDM.B, Bias.SDM.B, RMSE.NEVA.B, CorrCoeff.NEVA.B, Bias.NEVA.B)
 
@@ -1950,7 +1957,7 @@ ggplot2::ggsave(filename = paste(out.dir, "SpringTaylorDiagram", ".jpg", sep = "
 
 # Results — SDM shelfwide and regional changes ----------------------------
 # Read in projections
-out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_03152019/"
+out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_05072019/"
 results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = "")) # This should have everything we need. 
 
 # Filter species 
@@ -1967,6 +1974,9 @@ nelme<- as(st_read("~/GitHub/COCA/Data/NELME_sf.shp"), "Spatial")
 gom<- as(st_read("~/GitHub/COCA/Data/GoM_sf.shp"), "Spatial")
 south<- as(st_read("~/GitHub/COCA/Data/SNEandMAB_sf.shp"), "Spatial")
 
+# For these changes, don't want to use the cell by cell differences or percent differences...
+dat.sub<- dat.full[-which(grepl("diff", dat.full$Proj.Class)),] 
+
 # Overlay func
 overlay_func<- function(df, region, proj.use = proj4string(nelme)){
   dat.use<- data.frame(df)
@@ -1980,76 +1990,54 @@ overlay_func<- function(df, region, proj.use = proj4string(nelme)){
          South = mean(data.frame(pts.temp[!is.na(over(pts.temp, as(south, "SpatialPolygons"))),])[,3], na.rm = T))
 }
 
-preds.df.sub<- dat.full %>%
-  mutate(., "NELME.Mean.Change" = purrr::map2(Projections, list("NELME"), possibly(overlay_func, NA)),
-         "GOM.Mean.Change" = purrr::map2(Projections, list("GOM"), possibly(overlay_func, NA)),
-         "South.Mean.Change" = purrr::map2(Projections, list("South"), possibly(overlay_func, NA)))
+preds.df.sub<- dat.sub %>%
+  mutate(., "NELME.Mean" = purrr::map2(Projections, list("NELME"), possibly(overlay_func, NA)),
+         "GOM.Mean" = purrr::map2(Projections, list("GOM"), possibly(overlay_func, NA)),
+         "South.Mean" = purrr::map2(Projections, list("South"), possibly(overlay_func, NA)))
 
-overlay_perc_func<- function(df.base, df.future, region, proj.use = proj4string(nelme.sp)){
-  dat.use.base<- data.frame(df.base)
-  pts.temp.base<- dat.use.base
-  coordinates(pts.temp.base)<- ~x+y
-  proj4string(pts.temp.base)<- proj.use
-  
-  dat.use.fut<- data.frame(df.future)
-  pts.temp.fut<- dat.use.fut
-  coordinates(pts.temp.fut)<- ~x+y
-  proj4string(pts.temp.fut)<- proj.use
-  
-  base.mean<- switch(region,
-                     NELME = mean(dat.use.base[,3], na.rm = T),
-                     GOM = mean(data.frame(pts.temp.base[!is.na(over(pts.temp.base, as(gom.sp.wgs, "SpatialPolygons"))),])[,3], na.rm = T),
-                     South = mean(data.frame(pts.temp.base[!is.na(over(pts.temp.base, as(south2, "SpatialPolygons"))),])[,3], na.rm = T))
-  
-  fut.mean<- switch(region,
-                    NELME = mean(dat.use.fut[,3], na.rm = T),
-                    GOM = mean(data.frame(pts.temp.fut[!is.na(over(pts.temp.fut, as(gom.sp.wgs, "SpatialPolygons"))),])[,3], na.rm = T),
-                    South = mean(data.frame(pts.temp.fut[!is.na(over(pts.temp.fut, as(south2, "SpatialPolygons"))),])[,3], na.rm = T))
-  
-  perc.out<- 100*((fut.mean - base.mean)/base.mean)
-  return(perc.out)
-}
 
-preds.df.sub.perc<- preds.df.sub %>%
-  dplyr::select(., COMNAME, SEASON, Proj.Class, Projections) %>%
-  spread(., Proj.Class, Projections) %>%
-  mutate(., "NELME.Mean.Perc.Change.mu.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_mean.sdm.p, list("NELME")), possibly(overlay_perc_func, NA)),
-         "NELME.Mean.Perc.Change.mu.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_mean.combo.b, list("NELME")), possibly(overlay_perc_func, NA)),
-         "NELME.Mean.Perc.Change.warm.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_warm.sdm.p, list("NELME")), possibly(overlay_perc_func, NA)),
-         "NELME.Mean.Perc.Change.warm.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_warm.combo.b, list("NELME")), possibly(overlay_perc_func, NA)),
-         "NELME.Mean.Perc.Change.cold.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_cold.sdm.p, list("NELME")), possibly(overlay_perc_func, NA)),
-         "NELME.Mean.Perc.Change.cold.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_cold.combo.b, list("NELME")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.mu.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_mean.sdm.p, list("GOM")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.mu.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_mean.combo.b, list("GOM")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.warm.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_warm.sdm.p, list("GOM")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.warm.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_warm.combo.b, list("GOM")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.cold.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_cold.sdm.p, list("GOM")), possibly(overlay_perc_func, NA)),
-         "GOM.Mean.Perc.Change.cold.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_cold.combo.b, list("GOM")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.mu.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_mean.sdm.p, list("South")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.mu.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_mean.combo.b, list("South")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.warm.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_warm.sdm.p, list("South")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.warm.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_warm.combo.b, list("South")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.cold.p" = purrr::pmap(list(df.base = Baseline.sdm.p, df.future = Future_cold.sdm.p, list("South")), possibly(overlay_perc_func, NA)),
-         "South.Mean.Perc.Change.cold.b" = purrr::pmap(list(df.base = Baseline.sdm.b, df.future = Future_cold.combo.b, list("South")), possibly(overlay_perc_func, NA)))
+# Now, we want regional differences (raw and percentages)...
+preds.df.sub<- preds.df.sub %>%
+  dplyr::select(., COMNAME, SEASON, Proj.Class, NELME.Mean, GOM.Mean, South.Mean) %>%
+  gather(., Region, Projections, -COMNAME, -SEASON, -Proj.Class) %>%
+  mutate(., Proj.ClassandRegion = paste(Proj.Class, Region, sep = "_")) %>%
+  dplyr::select(., COMNAME, SEASON, Proj.ClassandRegion, Projections) %>%
+  spread(., Proj.ClassandRegion, Projections) %>%
+  mutate_if(., is.list, as.numeric) %>%
+  mutate(., "NELME.Mean.Change.mu.b" = Future_mean.sdm.b_NELME.Mean - Baseline.sdm.b_NELME.Mean,
+         "NELME.Mean.Change.warm.b" = Future_warm.sdm.b_NELME.Mean - Baseline.sdm.b_NELME.Mean,
+         "NELME.Mean.Change.cold.b" = Future_cold.sdm.b_NELME.Mean - Baseline.sdm.b_NELME.Mean,
+         "NELME.Mean.Perc.Change.mu.b" = 100*(NELME.Mean.Change.mu.b/Baseline.sdm.b_NELME.Mean),
+         "NELME.Mean.Perc.Change.warm.b" = 100*(NELME.Mean.Change.warm.b/Baseline.sdm.b_NELME.Mean),
+         "NELME.Mean.Perc.Change.cold.b" = 100*(NELME.Mean.Change.cold.b/Baseline.sdm.b_NELME.Mean),
+         "GOM.Mean.Change.mu.b" = Future_mean.sdm.b_GOM.Mean - Baseline.sdm.b_GOM.Mean,
+         "GOM.Mean.Change.warm.b" = Future_warm.sdm.b_GOM.Mean - Baseline.sdm.b_GOM.Mean,
+         "GOM.Mean.Change.cold.b" = Future_cold.sdm.b_GOM.Mean - Baseline.sdm.b_GOM.Mean,
+         "GOM.Mean.Perc.Change.mu.b" = 100*(GOM.Mean.Change.mu.b/Baseline.sdm.b_GOM.Mean),
+         "GOM.Mean.Perc.Change.warm.b" = 100*(GOM.Mean.Change.warm.b/Baseline.sdm.b_GOM.Mean),
+         "GOM.Mean.Perc.Change.cold.b" = 100*(GOM.Mean.Change.cold.b/Baseline.sdm.b_GOM.Mean),
+         "South.Mean.Change.mu.b" = Future_mean.sdm.b_South.Mean - Baseline.sdm.b_South.Mean,
+         "South.Mean.Change.warm.b" = Future_warm.sdm.b_South.Mean - Baseline.sdm.b_South.Mean,
+         "South.Mean.Change.cold.b" = Future_cold.sdm.b_South.Mean - Baseline.sdm.b_South.Mean,
+         "South.Mean.Perc.Change.mu.b" = 100*(South.Mean.Change.mu.b/Baseline.sdm.b_South.Mean),
+         "South.Mean.Perc.Change.warm.b" = 100*(South.Mean.Change.warm.b/Baseline.sdm.b_South.Mean),
+         "South.Mean.Perc.Change.cold.b" = 100*(South.Mean.Change.cold.b/Baseline.sdm.b_South.Mean))
 
-preds.df.sub.perc.plot<- preds.df.sub.perc %>%
-  dplyr::select(., COMNAME, SEASON, NELME.Mean.Perc.Change.mu.p, NELME.Mean.Perc.Change.mu.b, NELME.Mean.Perc.Change.warm.p, NELME.Mean.Perc.Change.warm.b, NELME.Mean.Perc.Change.cold.p, NELME.Mean.Perc.Change.cold.b, GOM.Mean.Perc.Change.mu.p, GOM.Mean.Perc.Change.mu.b, GOM.Mean.Perc.Change.warm.p, GOM.Mean.Perc.Change.warm.b, GOM.Mean.Perc.Change.cold.p, GOM.Mean.Perc.Change.cold.b, South.Mean.Perc.Change.mu.p, South.Mean.Perc.Change.mu.b, South.Mean.Perc.Change.warm.p, South.Mean.Perc.Change.warm.b, South.Mean.Perc.Change.cold.p, South.Mean.Perc.Change.cold.b) %>%
+preds.df.sub.perc.plot<- preds.df.sub %>%
+  dplyr::select(., COMNAME, SEASON, NELME.Mean.Perc.Change.mu.b, NELME.Mean.Perc.Change.warm.b, NELME.Mean.Perc.Change.cold.b, GOM.Mean.Perc.Change.mu.b, GOM.Mean.Perc.Change.warm.b, GOM.Mean.Perc.Change.cold.b, South.Mean.Perc.Change.mu.b, South.Mean.Perc.Change.warm.b, South.Mean.Perc.Change.cold.b) %>%
   gather(., "Region_Scenario", "Change", -COMNAME, -SEASON)
 preds.df.sub.perc.plot$Region_Only<- unlist(lapply(strsplit(preds.df.sub.perc.plot$Region_Scenario, "[.]"), "[", 1))
 preds.df.sub.perc.plot$Scenario_Only<- unlist(lapply(strsplit(sub("[.]", "*", preds.df.sub.perc.plot$Region_Scenario), "[*]"), "[", 2))
-preds.df.sub.perc.plot$Response_Only<- ifelse(grepl(".p", preds.df.sub.perc.plot$Scenario_Only, fixed = T), "Presence", "Biomass")
-preds.df.sub.perc.plot$Climate_Only<- ifelse(grepl("mu", preds.df.sub.perc.plot$Region_Scenario), "Mean", 
-                                             ifelse(grepl("warm", preds.df.sub.perc.plot$Region_Scenario), "Warm", "Cold"))
+preds.df.sub.perc.plot$Climate_Only<- ifelse(grepl("mu", preds.df.sub.perc.plot$Region_Scenario), "Average", 
+                                             ifelse(grepl("warm", preds.df.sub.perc.plot$Region_Scenario), "Extreme warming", "Mild"))
 
 ## Alright, we are now after a species - scenario - season - region - mean change dataframe...
 res<- preds.df.sub.perc.plot 
-res$Change<- as.numeric(unlist(res$Change))
-res$Change<- ifelse(res$Change >= 500, 500, res$Change)
+res$Change[is.infinite(res$Change)]<- NA
+res$Change[res$Change >= 500]<- 500
 
 # Biomass shelfwide warm and cold...
-plot.type.use<- "Biomass"
-res.plot<- res %>%
-  dplyr::filter(., Response_Only == plot.type.use)
+res.plot<- res
 
 # Lets add a functional group column...
 # Merge with functional groups....
@@ -2065,7 +2053,7 @@ res.plot<- res.plot %>%
   dplyr::arrange(., COMNAME, Functional.Group, SEASON, Region_Only, Climate_Only, Change)
 res.plot$COMNAME<- factor(res.plot$COMNAME, levels = unique(res.plot$COMNAME))
 res.plot$SEASON<- factor(res.plot$SEASON, levels = c("FALL", "SPRING"))
-res.plot$Climate_Only<- factor(res.plot$Climate_Only, levels = c("Mean", "Warm", "Cold"))
+res.plot$Climate_Only<- factor(res.plot$Climate_Only, levels = c("Average", "Extreme warming", "Mild"))
 res.plot$Region_Only<- factor(res.plot$Region_Only, levels = c("NELME", "GOM", "South"))
 
 res.plot.nelme<- res.plot %>%
@@ -2081,7 +2069,7 @@ names(res.plot.all)<- c("NELME", "GoM", "South")
 
 ## Climate variability across the shelf by season
 df<- data.frame(res.plot.all[[1]])
-df.null<- cbind(expand.grid(COMNAME = levels(res.plot.nelme$COMNAME), SEASON = unique(res.plot.nelme$SEASON), Climate_Only = unique(res.plot.nelme$Climate_Only), Region_Only = levels(res.plot.nelme$Region_Only), Response_Only = plot.type.use, Change = NA))
+df.null<- cbind(expand.grid(COMNAME = levels(res.plot.nelme$COMNAME), SEASON = unique(res.plot.nelme$SEASON), Climate_Only = unique(res.plot.nelme$Climate_Only), Region_Only = levels(res.plot.nelme$Region_Only), Change = NA))
 df.null<- df.null %>%
   left_join(., func.groups, by = "COMNAME")
 df<- rbind(df[,], df.null)
@@ -2114,9 +2102,9 @@ for(j in seq_along(levels(df$SEASON))){
   #dat.use.df<- dat.use.df %>%
   #arrange(., Plot.Group, COMNAME, SEASON)
   dat.use.df$COMNAME.Plot<- factor(dat.use.df$COMNAME, levels = rev(unique(dat.use.df$COMNAME)), labels = rev(unique(to_sentence_case(as.character(dat.use.df$COMNAME)))))
-  dat.use.df$Scenario<- ifelse(dat.use.df$Climate_Only == "Cold", "Cold",
-                               ifelse(dat.use.df$Climate_Only == "Warm", "Warm", "Average"))
-  dat.use.df$Scenario<- factor(dat.use.df$Scenario, levels = c("Cold", "Average", "Warm"))
+  dat.use.df$Scenario<- ifelse(dat.use.df$Climate_Only == "Mild", "Mild",
+                               ifelse(dat.use.df$Climate_Only == "Extreme warming", "Extreme warming", "Average"))
+  dat.use.df$Scenario<- factor(dat.use.df$Scenario, levels = c("Mild", "Average", "Extreme warming"))
   
   plot.out<- ggplot(data = dat.use.df, aes(x = COMNAME.Plot, y = Change, color = Scenario)) + 
     geom_hline(yintercept = 0, color = "#bdbdbd") +
@@ -2133,15 +2121,15 @@ for(j in seq_along(levels(df$SEASON))){
     facet_wrap(~Functional.Group, scales = "free_y") +
     ggtitle(paste(names(res.plot.all)[1], levels(df$SEASON)[j], sep = " "))
   
-  ggplot2::ggsave(filename = paste(out.dir, plot.type.use, names(res.plot.all)[1], levels(df$SEASON)[j], ".jpg", sep = ""), plot = plot.out, width = 11, height = 8, units = "in")
+  ggplot2::ggsave(filename = paste(out.dir, names(res.plot.all)[1], levels(df$SEASON)[j], ".jpg", sep = ""), plot = plot.out, width = 11, height = 8, units = "in")
 }
 
 ### Season, differences by region
 df<- data.frame(rbind(res.plot.all[[2]], res.plot.all[[3]]))
 df<- df %>%
-  filter(., as.character(Climate_Only) == "Mean" & as.character(Response_Only) == "Biomass")
+  filter(., as.character(Climate_Only) == "Average")
 df$Region_Only<- factor(df$Region_Only, levels = c("South", "GOM"), labels = c("Southern New England/Mid Atlantic Bight", "Gulf of Maine"))
-df.null<- cbind(expand.grid(COMNAME = levels(df$COMNAME), SEASON = unique(df$SEASON), Climate_Only = unique(df$Climate_Only), Region_Only = levels(df$Region_Only), Response_Only = plot.type.use, Change = NA))
+df.null<- cbind(expand.grid(COMNAME = levels(df$COMNAME), SEASON = unique(df$SEASON), Climate_Only = unique(df$Climate_Only), Region_Only = levels(df$Region_Only), Change = NA))
 df.null<- df.null %>%
   left_join(., func.groups, by = "COMNAME")
 df<- rbind(df[,], df.null)
@@ -2197,7 +2185,7 @@ for(i in seq_along(seasons)){
     guides(fill = guide_legend(reverse = TRUE)) +
     ggtitle(paste(seasons[i], sep = " "))
   
-  ggplot2::ggsave(filename = paste(out.dir, plot.type.use, seasons[i], ".jpg", sep = ""), plot = plot.means, width = 11, height = 8, units = "in")
+  ggplot2::ggsave(filename = paste(out.dir, seasons[i], ".jpg", sep = ""), plot = plot.means, width = 11, height = 8, units = "in")
 }
 
 ## Other presence and biomass plots
