@@ -28,6 +28,7 @@ library(broom)
 library(snakecase)
 library(openair)
 library(randomcoloR)
+library(here)
 
 # Data prep - Alaways run -------------------------------------------------
 ## Core functions
@@ -203,14 +204,11 @@ temp.scale<- function(new.temp, base.temp.mean, base.temp.sd){
 }
 
 #### Loading in the data and some prep
-# Data path
-dat.path<- "~/GitHub/COCA/Data/model.dat.rds"
-
 # Fish assessment species
-fish.spp<- read.csv("~/GitHub/COCA/Data/Assesmentfishspecies.csv")
+fish.spp<- read.csv(here("Data", "Assesmentfishspecies.csv"))
 
 # Read it in, filter to one species, do some quick formatting to fit the GAM
-dat<- readRDS(dat.path) %>% 
+dat<- readRDS(here("Data", "model.dat.rds")) %>% 
   filter(., SVSPP %in% fish.spp$SVSPP) %>%
   left_join(., fish.spp, by = "SVSPP") 
 
@@ -253,7 +251,7 @@ dat$TRAIN.TEST<- ifelse(as.Date(dat$DATE) >= train.start & as.Date(dat$DATE) <= 
                         ifelse(as.Date(dat$DATE) >= test.start & as.Date(dat$DATE) <= test.end, "TEST", "Neither"))
 
 # Bottom trawl strata
-bstrat<- st_read("~/GitHub/COCA/Data/BottomTrawlStrata/BTS_Strata.shp")
+bstrat<- st_read(here("Data/BottomTrawlStrata/", "BTS_Strata.shp"))
 
 # Get names of strata
 bstrat.names<- unique(bstrat$STRATA)
@@ -342,11 +340,8 @@ dat.test<- dat.test.f %>%
 
 ## We will also need correctly "rescaled" versions for the projection time periods
 # Need base.preds, fut.preds, nevaD and nevaV
-spring.preds = "~/GitHub/COCA/Data/spring.rast.preds06122018.rds"
-spring.preds<- readRDS(spring.preds)
-
-fall.preds = "~/GitHub/COCA/Data/fall.rast.preds06122018.rds"
-fall.preds<- readRDS(fall.preds)
+spring.preds<- readRDS(here("Data", "spring.rast.preds06122018.rds"))
+fall.preds<- readRDS(here("Data", "fall.rast.preds06122018.rds"))
 
 base.preds.sp<- spring.preds %>%
   dplyr::select(., x, y, Baseline, DEPTH, SHELF_POS) %>%
@@ -433,12 +428,12 @@ pred.dat<- bind_rows(pred.dat.f, pred.dat.s)
 rescaled.dat<- bind_rows(rescaled.dat.f, rescaled.dat.s)
 
 # Bring in vulnerability assessment datasets
-dir.dat<- read.csv("~/GitHub/COCA/Data/JHareDirectionalEffect.csv") %>%
+dir.dat<- read.csv(here("Data", "JHareDirectionalEffect.csv")) %>%
   mutate(., "COMNAME" = toupper(Species)) %>%
   dplyr::select(., -Species) %>%
   group_by(COMNAME) %>%
   nest(., .key = "Dir.Data")
-vuln.dat<- read.csv("~/GitHub/COCA/Data/JHareQualitativeDataResults.csv") %>%
+vuln.dat<- read.csv(here("Data", "JHareQualitativeDataResults.csv")) %>%
   group_by(., Species, Attribute.Category) %>%
   summarise_at(., .vars = c("Low", "Moderate", "High", "Very.High"), mean) 
 exp.dat<- vuln.dat %>%
@@ -1330,7 +1325,6 @@ saveRDS(result, file = paste(out.dir, "SDMPredictions.rds", sep = ""))
 
 
 # Predictions summarized for communities ----------------------------------------------
-out.dir<- "~/GitHub/COCA/Results/NormalVoting_BiomassIncPresNoExposure_05072019/"
 fish_avail_func<- function(df) {
   
   if(FALSE){
@@ -1395,7 +1389,7 @@ fish_avail_func<- function(df) {
 }
 
 # Bring in fishing footprints
-all.foot.dat<- readRDS("~/GitHub/COCA/Data/VTR fishing footprints by community and gear type 2011-2015.rds")
+all.foot.dat<- readRDS(here("Data", "VTR fishing footprints by community and gear type 2011-2015.rds"))
 ports.names<- all.foot.dat$JGS.COMMUNITY
 
 # Are there any "empty" footprints?
@@ -1621,7 +1615,7 @@ if(FALSE){
 }
 
 # Read in results and apply fish availability function to each of the projections datasets
-results<- read_rds(paste(out.dir, "SDMPredictions.rds", sep = ""))
+results<- read_rds(here("Results/NormalVoting_BiomassIncPresNoExposure_05072019", "SDMPredictions.rds"))
 
 # Quick check --
 results.check<- results %>%
@@ -1634,10 +1628,10 @@ results.sub<- results[-which(grepl("diff", results$Proj.Class)), ]
 results.sub<- results.sub %>%
   mutate(., "Fish.Availability" = map(Projections, possibly(fish_avail_func, NA)))
 
-saveRDS(results.sub, paste(out.dir, "FishAvailability.rds", sep = ""))
+saveRDS(results.sub, here("Results/NormalVoting_BiomassIncPresNoExposure_05072019", "FishAvailability.rds"))
 
 # Ideally, we want species-season-port and then all the changes as columns...
-results<- readRDS(paste(out.dir, "FishAvailability.rds", sep = ""))
+results<- readRDS(here("Results/NormalVoting_BiomassIncPresNoExposure_05072019", "FishAvailability.rds"))
 results$spp.season<- paste(results$COMNAME, results$SEASON, sep = ".")
 spp.season<- paste(rep(unique(results$COMNAME), each = 2), rep(c("FALL", "SPRING")), sep = ".")
 
@@ -1676,6 +1670,16 @@ result<- result %>%
          "Future_cold_percdiff.combo.b" = 100*(Future_cold_diff.combo.b/Baseline.combo.b),
          "Future_warm_percdiff.combo.b" = 100*(Future_warm_diff.combo.b/Baseline.combo.b))
 
+# Check -- Black sea bass stonington
+check<- result %>%
+  filter(., COMNAME == "BLACK SEA BASS" & grepl("STONINGTON_ME", Port))
+
+# Still have infinite values...why?
+check2<- check %>%
+  filter(., Baseline.combo.b == 0)
+unique(check2$SEASON)
+
+# Answer -- spring season!
 # Change all SD stat percent changes to NA
 result$Future_mean_percdiff.combo.b[result$Stat == "SD"]<- NA
 result$Future_cold_percdiff.combo.b[result$Stat == "SD"]<- NA
@@ -3078,8 +3082,6 @@ dat.mod.LevelRed<- data.frame(dat.dir.mod[,c(32, 20:31)])
 rf.f.red<- randomForest(Match.LevelRed ~ ., data = dat.mod.LevelRed, importance = TRUE)
 rf.f.red
 varImpPlot(rf.f.red)
-
-
 
 ## Random forest searching.....
 # Establish a list of possible values for mtry, nodesize and sampsize
