@@ -1661,8 +1661,10 @@ for(i in seq_along(spp.season)){
   }
 }
 
-# Now, calculate raw and percent changes...
+# Now, calculate raw and percent changes...Edited 06032019 to do down and over calculations!
 result<- result %>%
+  group_by(., COMNAME, Port, Stat) %>%
+  summarize_if(., is.numeric, mean, na.rm = TRUE) %>%
   mutate(., "Future_mean_diff.combo.b" = Future_mean.combo.b - Baseline.combo.b,
          "Future_cold_diff.combo.b" = Future_cold.combo.b - Baseline.combo.b,
          "Future_warm_diff.combo.b" = Future_warm.combo.b - Baseline.combo.b,
@@ -1689,7 +1691,8 @@ result$Future_warm_percdiff.combo.b[result$Stat == "SD"]<- NA
 temp<- result %>%
   filter(., COMNAME == "ATLANTIC CROAKER" & Port == "PORTLAND_ME.All.JGS.PROPORTION" & Stat == "Mean")
 
-# Group by species and Port, take column means
+# Group by species and Port, take column means. 06032019 Note -- this is where the INF is becoming an issue. Let's change any INF values FIRST to NA and then take the mean across the seasons. 
+result[result == Inf]<- NA
 out<- result %>% 
   group_by(COMNAME, Port, Stat) %>%
   summarize_if(is.double, mean, na.rm = TRUE) %>%
@@ -1737,14 +1740,16 @@ port.data.out<- port.data.out %>%
   gather(., "ProjectionScenario", "Value", -COMNAME, -Port_GearType, -CommunityOnly, -StateOnly, -Gear, -Footprint, -Stat) %>%
   dplyr::select(., COMNAME, CommunityOnly, StateOnly, Gear, Footprint, ProjectionScenario, Stat, Value)
 
-write_csv(port.data.out, paste(out.dir, "SppPortGearData_05072019.csv", sep = ""))
+out.dir<- "/Volumes/Shared/Research/COCA-conf/SDM and CFDERS Integration/Data/SDM Projections/"
+
+write_csv(port.data.out, paste(out.dir, "SppPortGearData_06032019.csv", sep = ""))
 
 ## A bit of clean up -- Kathy and Brian probably don't need all of this stuff
 ProjectionScenario.Keep<- c("Baseline.combo.b", "Future_mean.combo.b", "Future_mean_diff.combo.b", "Future_mean_percdiff.combo.b", "Future_warm.combo.b", "Future_warm_diff.combo.b", "Future_warm_percdiff.combo.b",  "Future_cold.combo.b", "Future_cold_diff.combo.b", "Future_cold_percdiff.combo.b")
 port.data.out.filtered<- port.data.out %>%
   filter(., Footprint == "Regular" & Stat == "Mean") %>%
   filter(., ProjectionScenario %in% ProjectionScenario.Keep)
-write_csv(port.data.out.filtered, paste(out.dir, "SppPortGearData_Filtered_05072019.csv", sep = ""))
+write_csv(port.data.out.filtered, paste(out.dir, "SppPortGearData_Filtered_06032019.csv", sep = ""))
 
 # Let's add in CFDERRS ports...
 vtr.cfderrs.table<- read_csv("~/GitHub/COCA-EcoAndEcon/Results/VTR_CFDERRS_Comparison_Edited_NoCounties.csv")
@@ -1761,7 +1766,7 @@ port.data.out<- port.data.out %>%
 colnames(port.data.out)<- c("CommonName", "Community", "CFDERSPortCode", "CFDERSPortName", "Gear", "Footprint", "ProjectionScenario", "Statistic", "Value")
 
 port.data.out$Gear<- gsub("[.]", "_", port.data.out$Gear)
-write.csv(port.data.out, "~/GitHub/COCA/Results/PortData05072019.csv")
+write.csv(port.data.out, "~/GitHub/COCA/Results/PortData06032019.csv")
 
 # Filter for Brad...
 scenarios.keep<- c("Baseline.combo.b", "Future_mean.combo.b", "Future_mean_diff.combo.b", "Future_mean_percdiff.combo.b", "Future_cold.combo.b", "Future_cold_diff.combo.b", "Future_cold_percdiff.combo.b", "Future_warm.combo.b", "Future_warm_diff.combo.b", "Future_warm_percdiff.combo.b")
@@ -1778,9 +1783,7 @@ brad<- brad %>%
   dplyr::select(., c("CommonName", "CFDERSCommonName", "Community", "CFDERSPortCode", "CFDERSPortName", "Gear", "Footprint", "ProjectionScenario", "Statistic", "Value")
   )
 
-brad.temp<- brad %>% 
-  filter(., CommonName == "ACADIAN REDFISH" & Community == "NEW BEDFORD_MA" & Gear == "All" & Footprint == "Regular")
-write.csv(brad, "~/GitHub/COCA/Results/EcoToEconPortData05072019.csv")
+write.csv(brad, paste(out.dir, "EcoToEconPortData06032019.csv", sep = ""))
 
 
 # Results — Filtering, always run -----------------------------------------------
